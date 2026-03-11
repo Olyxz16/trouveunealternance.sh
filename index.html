@@ -1,0 +1,1448 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JobHunter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:        #0d0f12;
+    --surface:   #13161b;
+    --surface2:  #1a1e26;
+    --border:    #252932;
+    --text:      #c8d0de;
+    --dim:       #4a5268;
+    --accent:    #4af0a0;
+    --accent2:   #4ab8f0;
+    --warn:      #f0c44a;
+    --danger:    #f04a6e;
+    --mono:      'IBM Plex Mono', monospace;
+    --sans:      'IBM Plex Sans', sans-serif;
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── LAYOUT ── */
+  .app { display: grid; grid-template-rows: 56px 1fr; height: 100vh; }
+
+  .topbar {
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky; top: 0; z-index: 100;
+  }
+
+  .logo {
+    font-family: var(--mono);
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--accent);
+    letter-spacing: 0.08em;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .logo::before { content: "> "; color: var(--dim); }
+
+  .topbar-spacer { flex: 1; }
+
+  .status-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--dim);
+    transition: background 0.3s;
+  }
+  .status-dot.connected { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+
+  .topbar-status {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--dim);
+    display: flex; align-items: center; gap: 6px;
+  }
+
+  .btn {
+    font-family: var(--mono);
+    font-size: 12px;
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+    border-radius: 3px;
+    transition: all 0.15s;
+    white-space: nowrap;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { border-color: var(--accent); color: var(--accent); }
+  .btn.primary:hover { background: var(--accent); color: var(--bg); }
+  .btn.danger { border-color: var(--danger); color: var(--danger); }
+  .btn.warn { border-color: var(--warn); color: var(--warn); }
+
+  .main { display: grid; grid-template-columns: 260px 1fr; overflow: hidden; }
+
+  /* ── SIDEBAR ── */
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow-y: auto;
+    padding: 20px 0;
+  }
+
+  .sidebar-section { padding: 0 16px 20px; }
+  .sidebar-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--dim);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    margin-bottom: 10px;
+  }
+
+  /* Stats grid */
+  .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .stat-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 10px;
+  }
+  .stat-card .val {
+    font-family: var(--mono);
+    font-size: 22px;
+    font-weight: 600;
+    color: var(--accent);
+    line-height: 1;
+  }
+  .stat-card .lbl {
+    font-size: 11px;
+    color: var(--dim);
+    margin-top: 4px;
+  }
+
+  /* Status filters */
+  .filter-list { display: flex; flex-direction: column; gap: 2px; }
+  .filter-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 7px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--dim);
+    transition: all 0.15s;
+  }
+  .filter-item:hover { background: var(--surface2); color: var(--text); }
+  .filter-item.active { background: var(--surface2); color: var(--accent); }
+  .filter-item .badge {
+    background: var(--border);
+    color: var(--dim);
+    font-size: 10px;
+    padding: 2px 6px;
+    border-radius: 10px;
+    min-width: 22px;
+    text-align: center;
+  }
+  .filter-item.active .badge { background: var(--accent); color: var(--bg); }
+
+  /* Pipeline buttons */
+  .pipeline-btns { display: flex; flex-direction: column; gap: 8px; }
+
+  /* ── MAIN CONTENT ── */
+  .content { display: flex; flex-direction: column; overflow: hidden; }
+
+  .content-header {
+    display: flex; align-items: center; gap: 12px;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .search-wrap { flex: 1; position: relative; }
+  .search-wrap input {
+    width: 100%;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 8px 12px 8px 32px;
+    border-radius: 3px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  .search-wrap input:focus { border-color: var(--accent2); }
+  .search-wrap::before {
+    content: "⌕";
+    position: absolute; left: 10px; top: 50%; transform: translateY(-50%);
+    color: var(--dim); font-size: 15px; pointer-events: none;
+  }
+
+  .type-toggle { display: flex; gap: 4px; }
+  .type-btn {
+    font-family: var(--mono); font-size: 11px;
+    padding: 6px 12px; border-radius: 3px;
+    border: 1px solid var(--border);
+    background: transparent; color: var(--dim);
+    cursor: pointer; transition: all 0.15s;
+  }
+  .type-btn.active { border-color: var(--accent2); color: var(--accent2); background: rgba(74,184,240,0.06); }
+
+  /* ── TABLE ── */
+  .table-wrap { flex: 1; overflow-y: auto; }
+
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--dim);
+    padding: 10px 16px;
+    text-align: left;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky; top: 0;
+  }
+
+  tbody tr {
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    transition: background 0.1s;
+  }
+  tbody tr:hover { background: var(--surface2); }
+  tbody tr.selected { background: rgba(74,240,160,0.04); }
+
+  tbody td {
+    padding: 12px 16px;
+    vertical-align: middle;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .company-name { font-weight: 500; color: #e0e8f5; }
+  .job-title { font-size: 12px; color: var(--dim); margin-top: 2px; }
+
+  /* Tags */
+  .tag {
+    display: inline-block;
+    font-family: var(--mono); font-size: 10px;
+    padding: 2px 7px; border-radius: 2px;
+    margin: 1px;
+    border: 1px solid;
+  }
+  .tag-DIRECT    { border-color: rgba(74,240,160,0.4); color: var(--accent); background: rgba(74,240,160,0.06); }
+  .tag-COMPANY_LEAD { border-color: rgba(74,184,240,0.4); color: var(--accent2); background: rgba(74,184,240,0.06); }
+
+  .stack-tags { display: flex; flex-wrap: wrap; gap: 3px; }
+  .stack-tag {
+    font-family: var(--mono); font-size: 10px;
+    padding: 1px 5px; border-radius: 2px;
+    background: var(--surface2); color: var(--dim);
+    border: 1px solid var(--border);
+  }
+
+  /* Status badges */
+  .status-badge {
+    font-family: var(--mono); font-size: 10px;
+    padding: 3px 8px; border-radius: 2px;
+    border: 1px solid;
+    white-space: nowrap;
+  }
+  .s-TO_APPLY    { border-color: rgba(74,240,160,0.5);  color: var(--accent); }
+  .s-TO_ENRICH   { border-color: rgba(74,184,240,0.5);  color: var(--accent2); }
+  .s-TO_CONTACT  { border-color: rgba(240,196,74,0.5);  color: var(--warn); }
+  .s-CONTACTED   { border-color: rgba(100,100,200,0.5); color: #a0a0e0; }
+  .s-REPLIED     { border-color: rgba(74,240,160,0.8);  color: var(--accent); }
+  .s-PASS        { border-color: var(--border); color: var(--dim); }
+  .s-NO_CONTACT_FOUND { border-color: rgba(240,74,110,0.4); color: var(--danger); }
+
+  .score-bar {
+    width: 40px; height: 4px;
+    background: var(--border); border-radius: 2px;
+    overflow: hidden;
+  }
+  .score-fill { height: 100%; background: var(--accent); border-radius: 2px; }
+
+  /* ── DETAIL PANEL ── */
+  .detail-overlay {
+    position: fixed; inset: 0; z-index: 200;
+    background: rgba(0,0,0,0.5);
+    display: none; align-items: stretch; justify-content: flex-end;
+  }
+  .detail-overlay.open { display: flex; }
+
+  .detail-panel {
+    width: 520px; max-width: 90vw;
+    background: var(--surface);
+    border-left: 1px solid var(--border);
+    display: flex; flex-direction: column;
+    overflow: hidden;
+    animation: slideIn 0.2s ease;
+  }
+  @keyframes slideIn { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  .detail-header {
+    padding: 20px 24px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: flex-start; gap: 12px;
+  }
+  .detail-header-text { flex: 1; }
+  .detail-company { font-size: 17px; font-weight: 500; color: #e0e8f5; }
+  .detail-title { font-size: 13px; color: var(--dim); margin-top: 3px; }
+
+  .detail-body { flex: 1; overflow-y: auto; padding: 20px 24px; }
+
+  .detail-section { margin-bottom: 20px; }
+  .detail-section-label {
+    font-family: var(--mono); font-size: 10px;
+    letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--dim); margin-bottom: 8px;
+  }
+
+  .field-row {
+    display: flex; gap: 8px; align-items: center;
+    padding: 6px 0; border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .field-label { color: var(--dim); width: 110px; flex-shrink: 0; }
+  .field-val { color: var(--text); word-break: break-all; }
+  .field-val a { color: var(--accent2); text-decoration: none; }
+  .field-val a:hover { text-decoration: underline; }
+
+  .status-select {
+    background: var(--surface2); border: 1px solid var(--border);
+    color: var(--text); font-family: var(--mono); font-size: 12px;
+    padding: 5px 8px; border-radius: 3px; cursor: pointer;
+  }
+
+  .email-draft-box {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 4px; padding: 14px;
+    font-family: var(--mono); font-size: 12px;
+    line-height: 1.7; white-space: pre-wrap;
+    color: var(--text);
+    max-height: 280px; overflow-y: auto;
+  }
+
+  .detail-footer {
+    padding: 16px 24px;
+    border-top: 1px solid var(--border);
+    display: flex; gap: 8px; flex-wrap: wrap;
+  }
+
+  /* ── TOAST ── */
+  .toast-container {
+    position: fixed; bottom: 24px; right: 24px;
+    display: flex; flex-direction: column; gap: 8px;
+    z-index: 500;
+  }
+  .toast {
+    font-family: var(--mono); font-size: 12px;
+    padding: 10px 16px; border-radius: 3px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    animation: toastIn 0.2s ease;
+    max-width: 320px;
+  }
+  .toast.success { border-color: var(--accent); color: var(--accent); }
+  .toast.error   { border-color: var(--danger); color: var(--danger); }
+  .toast.info    { border-color: var(--accent2); color: var(--accent2); }
+  @keyframes toastIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+
+  /* ── EMPTY STATE ── */
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; padding: 80px 24px;
+    color: var(--dim); gap: 12px;
+  }
+  .empty-state .icon { font-size: 36px; }
+  .empty-state .msg { font-family: var(--mono); font-size: 13px; }
+
+  /* ── NAV TABS ── */
+  .nav-tabs {
+    display: flex; gap: 2px; align-items: center;
+    margin: 0 16px;
+  }
+  .nav-tab {
+    font-family: var(--mono); font-size: 12px;
+    padding: 6px 16px; border-radius: 3px 3px 0 0;
+    border: 1px solid transparent;
+    background: transparent; color: var(--dim);
+    cursor: pointer; transition: all 0.15s;
+    border-bottom: none;
+  }
+  .nav-tab:hover { color: var(--text); }
+  .nav-tab.active { border-color: var(--border); border-bottom-color: var(--bg); background: var(--bg); color: var(--accent); }
+
+  /* ── PROSPECT STATUS BADGES ── */
+  .ps-NEW          { border-color: rgba(74,184,240,0.4); color: var(--accent2); }
+  .ps-ENRICHING    { border-color: rgba(240,196,74,0.5); color: var(--warn); }
+  .ps-TO_CONTACT   { border-color: rgba(240,196,74,0.8); color: var(--warn); }
+  .ps-CONTACTED    { border-color: rgba(100,100,200,0.5); color: #a0a0e0; }
+  .ps-REPLIED      { border-color: rgba(74,240,160,0.8); color: var(--accent); }
+  .ps-NOT_TECH     { border-color: var(--border); color: var(--dim); }
+  .ps-PASS         { border-color: var(--border); color: var(--dim); }
+
+  /* Company type pill */
+  .co-type {
+    font-family: var(--mono); font-size: 10px;
+    padding: 2px 7px; border-radius: 2px;
+    border: 1px solid rgba(74,184,240,0.3);
+    color: var(--accent2); background: rgba(74,184,240,0.05);
+  }
+
+  /* Scan config panel */
+  .scan-panel {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 4px; padding: 12px; margin-bottom: 12px;
+  }
+  .scan-panel input {
+    width: 100%; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); font-family: var(--mono); font-size: 12px;
+    padding: 6px 8px; border-radius: 3px; margin-bottom: 8px; outline: none;
+  }
+  .scan-panel input:focus { border-color: var(--accent2); }
+  .scan-panel label {
+    font-family: var(--mono); font-size: 10px; color: var(--dim);
+    letter-spacing: 0.08em; display: block; margin-bottom: 4px;
+  }
+</head>
+<body>
+<div class="app">
+
+  <!-- TOPBAR -->
+  <header class="topbar">
+    <div class="logo">jobhunter</div>
+    <nav class="nav-tabs">
+      <button class="nav-tab active" id="tabJobs" onclick="switchTab('jobs')">jobs</button>
+      <button class="nav-tab" id="tabProspects" onclick="switchTab('prospects')">prospects</button>
+    </nav>
+    <div class="topbar-spacer"></div>
+    <div class="topbar-status">
+      <div class="status-dot" id="sseStatus"></div>
+      <span id="sseLabel">connecting…</span>
+    </div>
+    <button class="btn" id="exportBtn" onclick="exportCurrent()">export .tsv</button>
+    <button class="btn primary" onclick="refreshAll()">↻ refresh</button>
+  </header>
+
+  <div class="main" id="jobsView">
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar">
+      <!-- Stats -->
+      <div class="sidebar-section">
+        <div class="sidebar-label">Overview</div>
+        <div class="stats-grid" id="statsGrid">
+          <div class="stat-card"><div class="val" id="statTotal">—</div><div class="lbl">total</div></div>
+          <div class="stat-card"><div class="val" id="statToday">—</div><div class="lbl">today</div></div>
+          <div class="stat-card"><div class="val" id="statDirect">—</div><div class="lbl">direct</div></div>
+          <div class="stat-card"><div class="val" id="statLeads">—</div><div class="lbl">leads</div></div>
+        </div>
+      </div>
+
+      <!-- Status filters -->
+      <div class="sidebar-section">
+        <div class="sidebar-label">Filter by status</div>
+        <div class="filter-list" id="filterList">
+          <div class="filter-item active" data-status="" onclick="setStatusFilter(this, '')">
+            all <span class="badge" id="badge-all">0</span>
+          </div>
+          <div class="filter-item" data-status="TO_APPLY" onclick="setStatusFilter(this, 'TO_APPLY')">
+            to_apply <span class="badge" id="badge-TO_APPLY">0</span>
+          </div>
+          <div class="filter-item" data-status="TO_ENRICH" onclick="setStatusFilter(this, 'TO_ENRICH')">
+            to_enrich <span class="badge" id="badge-TO_ENRICH">0</span>
+          </div>
+          <div class="filter-item" data-status="TO_CONTACT" onclick="setStatusFilter(this, 'TO_CONTACT')">
+            to_contact <span class="badge" id="badge-TO_CONTACT">0</span>
+          </div>
+          <div class="filter-item" data-status="CONTACTED" onclick="setStatusFilter(this, 'CONTACTED')">
+            contacted <span class="badge" id="badge-CONTACTED">0</span>
+          </div>
+          <div class="filter-item" data-status="REPLIED" onclick="setStatusFilter(this, 'REPLIED')">
+            replied <span class="badge" id="badge-REPLIED">0</span>
+          </div>
+          <div class="filter-item" data-status="NO_CONTACT_FOUND" onclick="setStatusFilter(this, 'NO_CONTACT_FOUND')">
+            no_contact <span class="badge" id="badge-NO_CONTACT_FOUND">0</span>
+          </div>
+          <div class="filter-item" data-status="PASS" onclick="setStatusFilter(this, 'PASS')">
+            pass <span class="badge" id="badge-PASS">0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Pipeline controls -->
+      <div class="sidebar-section">
+        <div class="sidebar-label">Pipeline</div>
+        <div class="pipeline-btns">
+          <button class="btn" onclick="triggerStage(1)">▶ run stage 1 (scrape)</button>
+          <button class="btn" onclick="triggerStage(2)">▶ run stage 2 (enrich)</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <div class="content">
+      <div class="content-header">
+        <div class="search-wrap">
+          <input type="text" id="searchBox" placeholder="search company, title, stack…" oninput="onSearch()" />
+        </div>
+        <div class="type-toggle">
+          <button class="type-btn active" id="typeAll" onclick="setType(this,'')">all</button>
+          <button class="type-btn" id="typeDirect" onclick="setType(this,'DIRECT')">direct</button>
+          <button class="type-btn" id="typeLeads" onclick="setType(this,'COMPANY_LEAD')">leads</button>
+        </div>
+      </div>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Company / Title</th>
+              <th>Type</th>
+              <th>Stack</th>
+              <th>Score</th>
+              <th>Status</th>
+              <th>Date</th>
+            </tr>
+          </thead>
+          <tbody id="jobsTable"></tbody>
+        </table>
+        <div class="empty-state" id="emptyState" style="display:none">
+          <div class="icon">∅</div>
+          <div class="msg">no listings found</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PROSPECTS VIEW -->
+<div class="main" id="prospectsView" style="display:none">
+
+  <!-- Prospects Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-section">
+      <div class="sidebar-label">Prospects</div>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="val" id="pStatTotal">—</div><div class="lbl">total</div></div>
+        <div class="stat-card"><div class="val" id="pStatToday">—</div><div class="lbl">today</div></div>
+        <div class="stat-card"><div class="val" id="pStatContact">—</div><div class="lbl">to contact</div></div>
+        <div class="stat-card"><div class="val" id="pStatContacted">—</div><div class="lbl">contacted</div></div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Filter by status</div>
+      <div class="filter-list" id="pFilterList">
+        <div class="filter-item active" data-status="" onclick="setPFilter(this,'')">all <span class="badge" id="pbadge-all">0</span></div>
+        <div class="filter-item" data-status="NEW" onclick="setPFilter(this,'NEW')">new <span class="badge" id="pbadge-NEW">0</span></div>
+        <div class="filter-item" data-status="TO_CONTACT" onclick="setPFilter(this,'TO_CONTACT')">to_contact <span class="badge" id="pbadge-TO_CONTACT">0</span></div>
+        <div class="filter-item" data-status="CONTACTED" onclick="setPFilter(this,'CONTACTED')">contacted <span class="badge" id="pbadge-CONTACTED">0</span></div>
+        <div class="filter-item" data-status="REPLIED" onclick="setPFilter(this,'REPLIED')">replied <span class="badge" id="pbadge-REPLIED">0</span></div>
+        <div class="filter-item" data-status="NOT_TECH" onclick="setPFilter(this,'NOT_TECH')">not_tech <span class="badge" id="pbadge-NOT_TECH">0</span></div>
+        <div class="filter-item" data-status="PASS" onclick="setPFilter(this,'PASS')">pass <span class="badge" id="pbadge-PASS">0</span></div>
+      </div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">By city</div>
+      <div class="filter-list" id="pCityList"></div>
+    </div>
+
+    <div class="sidebar-section">
+      <div class="sidebar-label">Scan for companies</div>
+      <div class="scan-panel">
+        <label>City</label>
+        <input type="text" id="scanCity" value="Bordeaux" placeholder="e.g. Bordeaux" />
+        <label>Departments (comma-sep)</label>
+        <input type="text" id="scanDepts" value="33,47,40" placeholder="e.g. 33,47" />
+        <button class="btn primary" style="width:100%" onclick="triggerScan()">▶ scan Pappers</button>
+      </div>
+      <div class="pipeline-btns" style="margin-top:8px">
+        <button class="btn" onclick="triggerProspectEnrich()">▶ enrich via LinkedIn</button>
+        <button class="btn" onclick="exportProspects()">export .tsv</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Prospects Table -->
+  <div class="content">
+    <div class="content-header">
+      <div class="search-wrap">
+        <input type="text" id="pSearchBox" placeholder="search company, stack, city…" oninput="onPSearch()" />
+      </div>
+      <div class="type-toggle">
+        <button class="type-btn active" id="pScoreAll" onclick="setPScore(this,0)">all scores</button>
+        <button class="type-btn" id="pScore5" onclick="setPScore(this,5)">score ≥ 5</button>
+        <button class="type-btn" id="pScore7" onclick="setPScore(this,7)">score ≥ 7</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Company</th>
+            <th>City / Size</th>
+            <th>Stack</th>
+            <th>Score</th>
+            <th>Contact</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="prospectsTable"></tbody>
+      </table>
+      <div class="empty-state" id="pEmptyState" style="display:none">
+        <div class="icon">∅</div>
+        <div class="msg">no prospects — run a scan first</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- DETAIL PANEL -->
+<div class="detail-overlay" id="detailOverlay" onclick="closeDetailOnBg(event)">
+  <div class="detail-panel" id="detailPanel">
+    <div class="detail-header">
+      <div class="detail-header-text">
+        <div class="detail-company" id="dCompany"></div>
+        <div class="detail-title" id="dTitle"></div>
+      </div>
+      <button class="btn" onclick="closeDetail()">✕</button>
+    </div>
+    <div class="detail-body" id="detailBody"></div>
+    <div class="detail-footer" id="detailFooter"></div>
+  </div>
+</div>
+
+<!-- TOASTS -->
+<div class="toast-container" id="toasts"></div>
+
+<script>
+// ── STATE ──────────────────────────────────────────────────────────────────
+let currentTab = 'jobs';
+
+// Jobs state
+let allJobs = [];
+let currentStatus = '';
+let currentType = '';
+let currentSearch = '';
+let selectedJobId = null;
+
+// Prospects state
+let allProspects = [];
+let pStatus = '';
+let pCity = '';
+let pSearch = '';
+let pMinScore = 0;
+let selectedProspectId = null;
+
+// ── TAB SWITCHING ──────────────────────────────────────────────────────────
+function switchTab(tab) {
+  currentTab = tab;
+  document.getElementById('jobsView').style.display = tab === 'jobs' ? 'grid' : 'none';
+  document.getElementById('prospectsView').style.display = tab === 'prospects' ? 'grid' : 'none';
+  document.getElementById('tabJobs').classList.toggle('active', tab === 'jobs');
+  document.getElementById('tabProspects').classList.toggle('active', tab === 'prospects');
+  closeDetail();
+  if (tab === 'prospects') { loadProspects(); loadProspectCities(); }
+}
+
+// ── API HELPERS ────────────────────────────────────────────────────────────
+const api = async (path, opts = {}) => {
+  const r = await fetch(`/api${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+};
+
+// ── INIT ───────────────────────────────────────────────────────────────────
+async function refreshAll() {
+  await Promise.all([loadStats(), loadJobs()]);
+  if (currentTab === 'prospects') { loadProspects(); loadProspectCities(); }
+}
+
+async function loadStats() {
+  try {
+    const s = await api('/stats');
+    document.getElementById('statTotal').textContent  = s.total;
+    document.getElementById('statToday').textContent  = s.new_today;
+    document.getElementById('statDirect').textContent = s.by_type?.DIRECT || 0;
+    document.getElementById('statLeads').textContent  = s.by_type?.COMPANY_LEAD || 0;
+    document.getElementById('badge-all').textContent  = s.total;
+
+    const statuses = ['TO_APPLY','TO_ENRICH','TO_CONTACT','CONTACTED','REPLIED','NO_CONTACT_FOUND','PASS'];
+    statuses.forEach(st => {
+      const el = document.getElementById(`badge-${st}`);
+      if (el) el.textContent = s.by_status?.[st] || 0;
+    });
+
+    // Prospect stats
+    document.getElementById('pStatTotal').textContent    = s.total_prospects || 0;
+    document.getElementById('pStatToday').textContent    = s.new_prospects_today || 0;
+    document.getElementById('pStatContact').textContent  = s.prospects_by_status?.TO_CONTACT || 0;
+    document.getElementById('pStatContacted').textContent = s.prospects_by_status?.CONTACTED || 0;
+    const pStatuses = ['NEW','TO_CONTACT','CONTACTED','REPLIED','NOT_TECH','PASS'];
+    pStatuses.forEach(st => {
+      const el = document.getElementById(`pbadge-${st}`);
+      if (el) el.textContent = s.prospects_by_status?.[st] || 0;
+    });
+    document.getElementById('pbadge-all').textContent = s.total_prospects || 0;
+  } catch(e) { console.error('Stats error', e); }
+}
+
+async function loadJobs() {
+  try {
+    const params = new URLSearchParams();
+    if (currentStatus) params.set('status', currentStatus);
+    if (currentType)   params.set('type', currentType);
+    if (currentSearch) params.set('search', currentSearch);
+    allJobs = await api(`/jobs?${params}`);
+    renderJobsTable(allJobs);
+  } catch(e) { console.error('Jobs error', e); }
+}
+
+// ── JOBS TABLE ─────────────────────────────────────────────────────────────
+function renderJobsTable(jobs) {
+  const tbody = document.getElementById('jobsTable');
+  const empty = document.getElementById('emptyState');
+  if (!jobs.length) { tbody.innerHTML = ''; empty.style.display = 'flex'; return; }
+  empty.style.display = 'none';
+  tbody.innerHTML = jobs.map(j => {
+    const tags = (j.tech_stack || '').split(',').filter(Boolean).slice(0, 4)
+      .map(t => `<span class="stack-tag">${esc(t.trim())}</span>`).join('');
+    const score = j.relevance_score || 0;
+    const selected = j.id === selectedJobId ? ' selected' : '';
+    return `<tr onclick="openJobDetail(${j.id})" class="${selected}">
+      <td><div class="company-name">${esc(j.company)}</div><div class="job-title">${esc(j.title)}</div></td>
+      <td><span class="tag tag-${j.type}">${j.type === 'DIRECT' ? 'direct' : 'lead'}</span></td>
+      <td><div class="stack-tags">${tags}</div></td>
+      <td>
+        <div class="score-bar"><div class="score-fill" style="width:${score*10}%"></div></div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:2px">${score}/10</div>
+      </td>
+      <td><span class="status-badge s-${j.status}">${j.status.toLowerCase().replace(/_/g,' ')}</span></td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--dim)">${j.date_found || ''}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── PROSPECTS TABLE ────────────────────────────────────────────────────────
+async function loadProspects() {
+  try {
+    const params = new URLSearchParams();
+    if (pStatus)   params.set('status', pStatus);
+    if (pCity)     params.set('city', pCity);
+    if (pSearch)   params.set('search', pSearch);
+    if (pMinScore) params.set('min_score', pMinScore);
+    allProspects = await api(`/prospects?${params}`);
+    renderProspectsTable(allProspects);
+  } catch(e) { console.error('Prospects error', e); }
+}
+
+async function loadProspectCities() {
+  try {
+    const cities = await api('/prospects/cities');
+    const list = document.getElementById('pCityList');
+    list.innerHTML = `<div class="filter-item ${!pCity ? 'active' : ''}" onclick="setPCity(this,'')">all cities</div>` +
+      cities.map(c => `
+        <div class="filter-item ${pCity===c.city ? 'active' : ''}" onclick="setPCity(this,'${esc(c.city)}')">
+          ${esc(c.city)} <span class="badge">${c.count}</span>
+        </div>`).join('');
+  } catch(e) {}
+}
+
+function renderProspectsTable(companies) {
+  const tbody = document.getElementById('prospectsTable');
+  const empty = document.getElementById('pEmptyState');
+  if (!companies.length) { tbody.innerHTML = ''; empty.style.display = 'flex'; return; }
+  empty.style.display = 'none';
+  tbody.innerHTML = companies.map(c => {
+    const tags = (c.tech_stack || '').split(',').filter(Boolean).slice(0, 4)
+      .map(t => `<span class="stack-tag">${esc(t.trim())}</span>`).join('');
+    const score = c.relevance_score || 0;
+    const hasContact = c.contact_name || c.contact_email;
+    const selected = c.id === selectedProspectId ? ' selected' : '';
+    return `<tr onclick="openProspectDetail(${c.id})" class="${selected}">
+      <td>
+        <div class="company-name">${esc(c.name)}</div>
+        <div class="job-title" style="font-size:11px">${esc(c.naf_label || c.source || '')}</div>
+      </td>
+      <td>
+        <div style="font-size:12px">${esc(c.city || '—')}</div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--dim)">${esc(c.headcount_range || c.headcount_exact || '?')} emp.</div>
+      </td>
+      <td><div class="stack-tags">${tags || '<span style="color:var(--dim);font-size:11px">—</span>'}</div></td>
+      <td>
+        <div class="score-bar"><div class="score-fill" style="width:${score*10}%;background:${score>=7?'var(--accent)':score>=5?'var(--warn)':'var(--danger)'}"></div></div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:2px">${score}/10</div>
+      </td>
+      <td style="font-size:12px;color:${hasContact?'var(--accent)':'var(--dim)'}">
+        ${hasContact ? esc(c.contact_name || '') : '—'}
+        ${c.contact_email ? '<div style="font-size:10px;font-family:var(--mono)">✉</div>' : ''}
+      </td>
+      <td><span class="status-badge ps-${c.status}">${c.status.toLowerCase().replace(/_/g,' ')}</span></td>
+    </tr>`;
+  }).join('');
+}
+
+// ── PROSPECT FILTERS ───────────────────────────────────────────────────────
+function setPFilter(el, status) {
+  document.querySelectorAll('#pFilterList .filter-item').forEach(e => e.classList.remove('active'));
+  el.classList.add('active');
+  pStatus = status;
+  loadProspects();
+}
+
+function setPCity(el, city) {
+  document.querySelectorAll('#pCityList .filter-item').forEach(e => e.classList.remove('active'));
+  el.classList.add('active');
+  pCity = city;
+  loadProspects();
+}
+
+function setPScore(el, score) {
+  document.querySelectorAll('.type-btn').forEach(e => e.classList.remove('active'));
+  el.classList.add('active');
+  pMinScore = score;
+  loadProspects();
+}
+
+let pSearchTimer;
+function onPSearch() {
+  clearTimeout(pSearchTimer);
+  pSearchTimer = setTimeout(() => {
+    pSearch = document.getElementById('pSearchBox').value;
+    loadProspects();
+  }, 250);
+}
+
+// ── JOB DETAIL ─────────────────────────────────────────────────────────────
+async function openJobDetail(id) {
+  selectedJobId = id;
+  const job = await api(`/jobs/${id}`);
+  document.getElementById('dCompany').textContent = job.company;
+  document.getElementById('dTitle').textContent   = job.title;
+  document.getElementById('detailBody').innerHTML = buildJobDetailHTML(job);
+  document.getElementById('detailFooter').innerHTML = `
+    <button class="btn primary" onclick="generateDraft(${job.id})">${job.email_draft ? '↻ regen' : '✉ draft'}</button>
+    ${job.contact_email ? `<button class="btn warn" onclick="sendEmail(${job.id})">send email</button>` : ''}
+    <button class="btn danger" onclick="updateStatus(${job.id},'PASS')">pass</button>
+  `;
+  document.getElementById('detailOverlay').classList.add('open');
+}
+
+function buildJobDetailHTML(j) {
+  const field = (label, val, isLink) => {
+    if (!val) return '';
+    const v = isLink ? `<a href="${esc(val)}" target="_blank">${esc(val)}</a>` : esc(val);
+    return `<div class="field-row"><span class="field-label">${label}</span><span class="field-val">${v}</span></div>`;
+  };
+  let draft = '';
+  if (j.email_draft) {
+    try {
+      const d = JSON.parse(j.email_draft);
+      draft = `<div class="detail-section">
+        <div class="detail-section-label">Email Draft</div>
+        <div class="email-draft-box">Subject: ${esc(d.subject)}\n\n${esc(d.body)}</div>
+        <div style="margin-top:8px"><div class="detail-section-label">LinkedIn</div>
+        <div class="email-draft-box">${esc(d.linkedin_msg)}</div></div>
+      </div>`;
+    } catch(e) {}
+  }
+  const statusOptions = ['TO_APPLY','TO_ENRICH','TO_CONTACT','CONTACTED','REPLIED','NO_CONTACT_FOUND','PASS']
+    .map(s => `<option value="${s}" ${j.status===s?'selected':''}>${s}</option>`).join('');
+  return `
+    <div class="detail-section">
+      <div class="detail-section-label">Listing</div>
+      ${field('Source', j.source_site)} ${field('Type', j.type)} ${field('Contract', j.contract_type)}
+      ${field('Location', j.location)} ${field('Apply URL', j.apply_url, true)} ${field('Date', j.date_found)}
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">Tech Stack</div>
+      <div class="stack-tags" style="flex-wrap:wrap;gap:4px;padding:4px 0">
+        ${(j.tech_stack||'').split(',').filter(Boolean).map(t=>`<span class="stack-tag">${esc(t.trim())}</span>`).join('')}
+      </div>
+    </div>
+    ${j.description_summary?`<div class="detail-section"><div class="detail-section-label">Summary</div><div style="font-size:13px;line-height:1.6">${esc(j.description_summary)}</div></div>`:''}
+    <div class="detail-section">
+      <div class="detail-section-label">Contact</div>
+      ${field('Name', j.contact_name)} ${field('Role', j.contact_role)}
+      ${field('Email', j.contact_email)} ${field('LinkedIn', j.contact_linkedin, true)}
+      ${field('Careers', j.careers_page_url, true)}
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">Status</div>
+      <select class="status-select" onchange="updateStatus(${j.id},this.value)">${statusOptions}</select>
+    </div>
+    ${j.notes?`<div class="detail-section"><div class="detail-section-label">Notes</div><div style="color:var(--dim);font-size:12px;font-family:var(--mono);line-height:1.6">${esc(j.notes)}</div></div>`:''}
+    ${draft}`;
+}
+
+// ── PROSPECT DETAIL ────────────────────────────────────────────────────────
+async function openProspectDetail(id) {
+  selectedProspectId = id;
+  document.querySelectorAll('#prospectsTable tr').forEach(r => r.classList.remove('selected'));
+  event.currentTarget.classList.add('selected');
+
+  const c = await api(`/prospects/${id}`);
+  document.getElementById('dCompany').textContent = c.name;
+  document.getElementById('dTitle').textContent = `${c.naf_label || ''} · ${c.city || ''} · ${c.headcount_range || '?'} emp.`;
+  document.getElementById('detailBody').innerHTML = buildProspectDetailHTML(c);
+  document.getElementById('detailFooter').innerHTML = `
+    <button class="btn primary" onclick="generateProspectDraft(${c.id})">${c.email_draft ? '↻ regen' : '✉ draft'}</button>
+    ${c.contact_email ? `<button class="btn warn" onclick="sendProspectEmail(${c.id})">send email</button>` : ''}
+    ${c.website ? `<button class="btn" onclick="window.open('${esc(c.website)}','_blank')">website ↗</button>` : ''}
+    ${c.linkedin_url ? `<button class="btn" onclick="window.open('${esc(c.linkedin_url)}','_blank')">linkedin ↗</button>` : ''}
+    <button class="btn danger" onclick="updateProspectStatus(${c.id},'PASS')">pass</button>
+  `;
+  document.getElementById('detailOverlay').classList.add('open');
+}
+
+function buildProspectDetailHTML(c) {
+  const field = (label, val, isLink) => {
+    if (!val) return '';
+    const v = isLink ? `<a href="${esc(val)}" target="_blank">${esc(val)}</a>` : esc(val);
+    return `<div class="field-row"><span class="field-label">${label}</span><span class="field-val">${v}</span></div>`;
+  };
+
+  let draft = '';
+  if (c.email_draft) {
+    try {
+      const d = JSON.parse(c.email_draft);
+      draft = `<div class="detail-section">
+        <div class="detail-section-label">Email Draft</div>
+        <div class="email-draft-box">Subject: ${esc(d.subject)}\n\n${esc(d.body)}</div>
+        <div style="margin-top:8px"><div class="detail-section-label">LinkedIn</div>
+        <div class="email-draft-box">${esc(d.linkedin_msg)}</div></div>
+      </div>`;
+    } catch(e) {}
+  }
+
+  const statusOptions = ['NEW','ENRICHING','TO_CONTACT','CONTACTED','REPLIED','NOT_TECH','PASS']
+    .map(s => `<option value="${s}" ${c.status===s?'selected':''}>${s}</option>`).join('');
+
+  return `
+    <div class="detail-section">
+      <div class="detail-section-label">Company</div>
+      ${field('SIREN', c.siren)} ${field('NAF', `${c.naf_code} — ${c.naf_label}`)}
+      ${field('City', c.city)} ${field('Address', c.address)}
+      ${field('Size', c.headcount_range || (c.headcount_exact ? c.headcount_exact + ' employees' : null))}
+      ${field('Founded', c.creation_year)} ${field('Legal form', c.legal_form)}
+      ${field('Source', c.source)} ${field('Founded', c.date_found)}
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">Web presence</div>
+      ${field('Website', c.website, true)} ${field('LinkedIn', c.linkedin_url, true)}
+      ${field('GitHub', c.github_url, true)} ${field('Careers', c.careers_page_url, true)}
+    </div>
+    ${c.description?`<div class="detail-section"><div class="detail-section-label">Description</div><div style="font-size:13px;line-height:1.6">${esc(c.description)}</div></div>`:''}
+    <div class="detail-section">
+      <div class="detail-section-label">Tech Stack</div>
+      <div class="stack-tags" style="flex-wrap:wrap;gap:4px;padding:4px 0">
+        ${(c.tech_stack||'').split(',').filter(Boolean).map(t=>`<span class="stack-tag">${esc(t.trim())}</span>`).join('')
+          || '<span style="color:var(--dim);font-size:11px">unknown — run enrichment</span>'}
+      </div>
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">Contact</div>
+      ${field('Name', c.contact_name)} ${field('Role', c.contact_role)}
+      ${field('Email', c.contact_email)} ${field('LinkedIn', c.contact_linkedin, true)}
+    </div>
+    <div class="detail-section">
+      <div class="detail-section-label">Status & Score</div>
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:8px">
+        <select class="status-select" onchange="updateProspectStatus(${c.id},this.value)">${statusOptions}</select>
+        <div style="font-family:var(--mono);font-size:13px;color:var(--accent)">${c.relevance_score || 0}/10</div>
+      </div>
+    </div>
+    ${c.notes?`<div class="detail-section"><div class="detail-section-label">Notes</div><div style="color:var(--dim);font-size:12px;font-family:var(--mono);line-height:1.6">${esc(c.notes)}</div></div>`:''}
+    ${draft}`;
+}
+
+// ── JOBS FILTERS ───────────────────────────────────────────────────────────
+function setStatusFilter(el, status) {
+  document.querySelectorAll('#filterList .filter-item').forEach(e => e.classList.remove('active'));
+  el.classList.add('active');
+  currentStatus = status;
+  loadJobs();
+}
+function setType(el, type) {
+  document.querySelectorAll('.type-btn').forEach(e => e.classList.remove('active'));
+  el.classList.add('active');
+  currentType = type;
+  loadJobs();
+}
+let searchTimer;
+function onSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => { currentSearch = document.getElementById('searchBox').value; loadJobs(); }, 250);
+}
+
+// ── ACTIONS: JOBS ──────────────────────────────────────────────────────────
+async function updateStatus(id, status) {
+  try {
+    await api(`/jobs/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+    toast(`Status → ${status}`, 'success');
+    await refreshAll();
+    if (selectedJobId === id) openJobDetail(id);
+  } catch(e) { toast(`Error: ${e.message}`, 'error'); }
+}
+
+async function generateDraft(id) {
+  toast('Drafting...', 'info');
+  try {
+    await api(`/jobs/${id}/draft`, { method: 'POST' });
+    toast('Draft ready!', 'success');
+    openJobDetail(id);
+  } catch(e) { toast(`Error: ${e.message}`, 'error'); }
+}
+
+async function sendEmail(id) {
+  const job = await api(`/jobs/${id}`);
+  if (!job.email_draft) { toast('Generate a draft first', 'error'); return; }
+  if (!confirm(`Send to ${job.contact_email}?`)) return;
+  try {
+    const draft = JSON.parse(job.email_draft);
+    await api(`/jobs/${id}/send`, { method: 'POST', body: JSON.stringify(draft) });
+    toast('Sent!', 'success');
+    refreshAll(); openJobDetail(id);
+  } catch(e) { toast(`Failed: ${e.message}`, 'error'); }
+}
+
+// ── ACTIONS: PROSPECTS ─────────────────────────────────────────────────────
+async function updateProspectStatus(id, status) {
+  try {
+    await api(`/prospects/${id}`, { method: 'PATCH', body: JSON.stringify({ status }) });
+    toast(`Status → ${status}`, 'success');
+    await refreshAll(); loadProspects();
+    if (selectedProspectId === id) openProspectDetail(id);
+  } catch(e) { toast(`Error: ${e.message}`, 'error'); }
+}
+
+async function generateProspectDraft(id) {
+  toast('Drafting...', 'info');
+  try {
+    await api(`/prospects/${id}/draft`, { method: 'POST' });
+    toast('Draft ready!', 'success');
+    openProspectDetail(id);
+  } catch(e) { toast(`Error: ${e.message}`, 'error'); }
+}
+
+async function sendProspectEmail(id) {
+  const c = await api(`/prospects/${id}`);
+  if (!c.email_draft) { toast('Generate a draft first', 'error'); return; }
+  if (!confirm(`Send to ${c.contact_email}?`)) return;
+  try {
+    const draft = JSON.parse(c.email_draft);
+    await api(`/prospects/${id}/send`, { method: 'POST', body: JSON.stringify(draft) });
+    toast('Sent!', 'success');
+    refreshAll(); loadProspects(); openProspectDetail(id);
+  } catch(e) { toast(`Failed: ${e.message}`, 'error'); }
+}
+
+// ── PIPELINE TRIGGERS ──────────────────────────────────────────────────────
+async function triggerStage(n) {
+  toast(`Starting Stage ${n}...`, 'info');
+  try {
+    await api(`/pipeline/stage${n}`, { method: 'POST' });
+    toast(`Stage ${n} running`, 'success');
+  } catch(e) { toast(`Error: ${e.message}`, 'error'); }
+}
+
+async function triggerScan() {
+  const city = document.getElementById('scanCity').value.trim();
+  const depts = document.getElementById('scanDepts').value.trim();
+  if (!city) { toast('Enter a city name', 'error'); return; }
+  toast(`Scanning Pappers for ${city}...`, 'info');
+  try {
+    await api(`/pipeline/scan?city=${encodeURIComponent(city)}&departments=${encodeURIComponent(depts)}`, { method: 'POST' });
+    toast('Scan started — check back in a moment', 'success');
+  } catch(e) { toast(`Error: ${e.message}`, 'error'); }
+}
+
+async function triggerProspectEnrich() {
+  toast('Launching LinkedIn enrichment...', 'info');
+  try {
+    await api('/pipeline/enrich-prospects', { method: 'POST' });
+    toast('Enrichment started in background', 'success');
+  } catch(e) { toast(`Error: ${e.message}`, 'error'); }
+}
+
+// ── EXPORT ─────────────────────────────────────────────────────────────────
+function exportCurrent() {
+  if (currentTab === 'jobs') window.open('/api/export/tsv', '_blank');
+  else exportProspects();
+}
+function exportProspects() { window.open('/api/export/prospects', '_blank'); }
+
+// ── DETAIL PANEL ───────────────────────────────────────────────────────────
+function closeDetail() {
+  document.getElementById('detailOverlay').classList.remove('open');
+  selectedJobId = null; selectedProspectId = null;
+}
+function closeDetailOnBg(e) {
+  if (e.target === document.getElementById('detailOverlay')) closeDetail();
+}
+
+// ── SSE ────────────────────────────────────────────────────────────────────
+function connectSSE() {
+  const es = new EventSource('/api/events');
+  const dot = document.getElementById('sseStatus');
+  const lbl = document.getElementById('sseLabel');
+  es.onopen = () => { dot.classList.add('connected'); lbl.textContent = 'live'; };
+  es.onerror = () => {
+    dot.classList.remove('connected'); lbl.textContent = 'reconnecting…';
+    setTimeout(connectSSE, 3000); es.close();
+  };
+  es.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (['status_change','pipeline','prospect_update'].includes(data.type)) {
+      refreshAll();
+      if (data.type === 'pipeline' && data.status === 'done')
+        toast(`${data.stage} complete!`, 'success');
+    }
+  };
+}
+
+// ── TOASTS ─────────────────────────────────────────────────────────────────
+function toast(msg, type = 'info') {
+  const container = document.getElementById('toasts');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  container.appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+// ── UTILS ──────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── BOOT ───────────────────────────────────────────────────────────────────
+refreshAll();
+connectSSE();
+</script>
+</body>
+</html>
+
+// ── API HELPERS ────────────────────────────────────────────────────────────
+const api = async (path, opts = {}) => {
+  const r = await fetch(`/api${path}`, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+};
+
+// ── INIT ───────────────────────────────────────────────────────────────────
+async function refreshAll() {
+  await Promise.all([loadStats(), loadJobs()]);
+}
+
+async function loadStats() {
+  try {
+    const s = await api('/stats');
+    document.getElementById('statTotal').textContent  = s.total;
+    document.getElementById('statToday').textContent  = s.new_today;
+    document.getElementById('statDirect').textContent = s.by_type?.DIRECT || 0;
+    document.getElementById('statLeads').textContent  = s.by_type?.COMPANY_LEAD || 0;
+    document.getElementById('badge-all').textContent  = s.total;
+
+    const statuses = ['TO_APPLY','TO_ENRICH','TO_CONTACT','CONTACTED','REPLIED','NO_CONTACT_FOUND','PASS'];
+    statuses.forEach(st => {
+      const el = document.getElementById(`badge-${st}`);
+      if (el) el.textContent = s.by_status?.[st] || 0;
+    });
+  } catch(e) { console.error('Stats error', e); }
+}
+
+async function loadJobs() {
+  try {
+    const params = new URLSearchParams();
+    if (currentStatus) params.set('status', currentStatus);
+    if (currentType)   params.set('type', currentType);
+    if (currentSearch) params.set('search', currentSearch);
+    allJobs = await api(`/jobs?${params}`);
+    renderTable(allJobs);
+  } catch(e) { console.error('Jobs error', e); }
+}
+
+// ── TABLE RENDER ───────────────────────────────────────────────────────────
+function renderTable(jobs) {
+  const tbody = document.getElementById('jobsTable');
+  const empty = document.getElementById('emptyState');
+
+  if (!jobs.length) {
+    tbody.innerHTML = '';
+    empty.style.display = 'flex';
+    return;
+  }
+  empty.style.display = 'none';
+
+  tbody.innerHTML = jobs.map(j => {
+    const tags = (j.tech_stack || '').split(',').filter(Boolean).slice(0, 4)
+      .map(t => `<span class="stack-tag">${t.trim()}</span>`).join('');
+    const score = j.relevance_score || 0;
+    const selected = j.id === selectedJobId ? ' selected' : '';
+    return `<tr onclick="openDetail(${j.id})" class="${selected}">
+      <td>
+        <div class="company-name">${esc(j.company)}</div>
+        <div class="job-title">${esc(j.title)}</div>
+      </td>
+      <td><span class="tag tag-${j.type}">${j.type === 'DIRECT' ? 'direct' : 'lead'}</span></td>
+      <td><div class="stack-tags">${tags}</div></td>
+      <td>
+        <div class="score-bar"><div class="score-fill" style="width:${score*10}%"></div></div>
+        <div style="font-family:var(--mono);font-size:10px;color:var(--dim);margin-top:2px">${score}/10</div>
+      </td>
+      <td><span class="status-badge s-${j.status}">${j.status.toLowerCase().replace(/_/g,' ')}</span></td>
+      <td style="font-family:var(--mono);font-size:11px;color:var(--dim)">${j.date_found || ''}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── FILTERS ────────────────────────────────────────────────────────────────
+function setStatusFilter(el, status) {
+  document.querySelectorAll('.filter-item').forEach(e => e.classList.remove('active'));
+  el.classList.add('active');
+  currentStatus = status;
+  loadJobs();
+}
+
+function setType(el, type) {
+  document.querySelectorAll('.type-btn').forEach(e => e.classList.remove('active'));
+  el.classList.add('active');
+  currentType = type;
+  loadJobs();
+}
+
+let searchTimer;
+function onSearch() {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => {
+    currentSearch = document.getElementById('searchBox').value;
+    loadJobs();
+  }, 250);
+}
+
+// ── DETAIL PANEL ───────────────────────────────────────────────────────────
+async function openDetail(id) {
+  selectedJobId = id;
+  document.querySelectorAll('tbody tr').forEach(r => r.classList.remove('selected'));
+  event.currentTarget.classList.add('selected');
+
+  const job = await api(`/jobs/${id}`);
+  document.getElementById('dCompany').textContent = job.company;
+  document.getElementById('dTitle').textContent   = job.title;
+
+  document.getElementById('detailBody').innerHTML = buildDetailHTML(job);
+  document.getElementById('detailFooter').innerHTML = buildFooterHTML(job);
+  document.getElementById('detailOverlay').classList.add('open');
+}
+
+function buildDetailHTML(j) {
+  const field = (label, val, isLink) => {
+    if (!val) return '';
+    const v = isLink ? `<a href="${esc(val)}" target="_blank">${esc(val)}</a>` : esc(val);
+    return `<div class="field-row"><span class="field-label">${label}</span><span class="field-val">${v}</span></div>`;
+  };
+
+  let draft = '';
+  if (j.email_draft) {
+    try {
+      const d = JSON.parse(j.email_draft);
+      draft = `<div class="detail-section">
+        <div class="detail-section-label">Email Draft</div>
+        <div class="email-draft-box">Subject: ${esc(d.subject)}\n\n${esc(d.body)}</div>
+        <div style="margin-top:8px">
+          <div class="detail-section-label">LinkedIn Message</div>
+          <div class="email-draft-box">${esc(d.linkedin_msg)}</div>
+        </div>
+      </div>`;
+    } catch(e) {}
+  }
+
+  const statusOptions = ['TO_APPLY','TO_ENRICH','TO_CONTACT','CONTACTED','REPLIED','NO_CONTACT_FOUND','PASS']
+    .map(s => `<option value="${s}" ${j.status === s ? 'selected' : ''}>${s}</option>`).join('');
+
+  return `
+    <div class="detail-section">
+      <div class="detail-section-label">Listing</div>
+      ${field('Source', j.source_site)}
+      ${field('Type', j.type)}
+      ${field('Contract', j.contract_type)}
+      ${field('Location', j.location)}
+      ${field('Apply URL', j.apply_url, true)}
+      ${field('Date found', j.date_found)}
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-label">Tech Stack</div>
+      <div class="stack-tags" style="flex-wrap:wrap;gap:4px;padding:4px 0">
+        ${(j.tech_stack||'').split(',').filter(Boolean).map(t => `<span class="stack-tag">${esc(t.trim())}</span>`).join('')}
+      </div>
+    </div>
+
+    ${j.description_summary ? `<div class="detail-section">
+      <div class="detail-section-label">Summary</div>
+      <div style="color:var(--text);font-size:13px;line-height:1.6">${esc(j.description_summary)}</div>
+    </div>` : ''}
+
+    <div class="detail-section">
+      <div class="detail-section-label">Contact</div>
+      ${field('Name', j.contact_name)}
+      ${field('Role', j.contact_role)}
+      ${field('Email', j.contact_email)}
+      ${field('LinkedIn', j.contact_linkedin, true)}
+      ${field('Careers page', j.careers_page_url, true)}
+    </div>
+
+    <div class="detail-section">
+      <div class="detail-section-label">Status</div>
+      <select class="status-select" onchange="updateStatus(${j.id}, this.value)">
+        ${statusOptions}
+      </select>
+    </div>
+
+    ${j.notes ? `<div class="detail-section">
+      <div class="detail-section-label">Notes</div>
+      <div style="color:var(--dim);font-size:12px;font-family:var(--mono);line-height:1.6">${esc(j.notes)}</div>
+    </div>` : ''}
+
+    ${draft}
+  `;
+}
+
+function buildFooterHTML(j) {
+  const hasDraft = !!j.email_draft;
+  return `
+    <button class="btn primary" onclick="generateDraft(${j.id})">${hasDraft ? '↻ regen draft' : '✉ draft email'}</button>
+    ${j.contact_email ? `<button class="btn warn" onclick="sendEmail(${j.id})">send email</button>` : ''}
+    <button class="btn danger" onclick="updateStatus(${j.id}, 'PASS')">pass</button>
+  `;
+}
+
+function closeDetail() {
+  document.getElementById('detailOverlay').classList.remove('open');
+  selectedJobId = null;
+}
+
+function closeDetailOnBg(e) {
+  if (e.target === document.getElementById('detailOverlay')) closeDetail();
+}
+
+// ── ACTIONS ────────────────────────────────────────────────────────────────
+async function updateStatus(id, status) {
+  try {
+    await api(`/jobs/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status })
+    });
+    toast(`Status → ${status}`, 'success');
+    await refreshAll();
+    if (selectedJobId === id) openDetail(id);
+  } catch(e) { toast(`Error: ${e.message}`, 'error'); }
+}
+
+async function generateDraft(id) {
+  toast('Drafting email...', 'info');
+  try {
+    const draft = await api(`/jobs/${id}/draft`, { method: 'POST' });
+    toast('Draft ready!', 'success');
+    openDetail(id);
+  } catch(e) { toast(`Draft failed: ${e.message}`, 'error'); }
+}
+
+async function sendEmail(id) {
+  const job = await api(`/jobs/${id}`);
+  if (!job.email_draft) { toast('Generate a draft first', 'error'); return; }
+  if (!confirm(`Send email to ${job.contact_email}?`)) return;
+  try {
+    const draft = JSON.parse(job.email_draft);
+    await api(`/jobs/${id}/send`, { method: 'POST', body: JSON.stringify(draft) });
+    toast('Email sent!', 'success');
+    await refreshAll();
+    openDetail(id);
+  } catch(e) { toast(`Send failed: ${e.message}`, 'error'); }
+}
+
+async function triggerStage(n) {
+  toast(`Starting Stage ${n}...`, 'info');
+  try {
+    await api(`/pipeline/stage${n}`, { method: 'POST' });
+    toast(`Stage ${n} running in background`, 'success');
+  } catch(e) { toast(`Error: ${e.message}`, 'error'); }
+}
+
+async function exportTSV() {
+  window.open('/api/export/tsv', '_blank');
+}
+
+// ── SSE ────────────────────────────────────────────────────────────────────
+function connectSSE() {
+  const es = new EventSource('/api/events');
+  const dot = document.getElementById('sseStatus');
+  const lbl = document.getElementById('sseLabel');
+
+  es.onopen = () => {
+    dot.classList.add('connected');
+    lbl.textContent = 'live';
+  };
+  es.onerror = () => {
+    dot.classList.remove('connected');
+    lbl.textContent = 'reconnecting…';
+    setTimeout(connectSSE, 3000);
+    es.close();
+  };
+  es.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.type === 'status_change' || data.type === 'pipeline') {
+      refreshAll();
+      if (data.type === 'pipeline' && data.status === 'done') {
+        toast(`Stage ${data.stage} complete!`, 'success');
+      }
+    }
+  };
+}
+
+// ── TOASTS ─────────────────────────────────────────────────────────────────
+function toast(msg, type = 'info') {
+  const container = document.getElementById('toasts');
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  container.appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+// ── UTILS ──────────────────────────────────────────────────────────────────
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── BOOT ───────────────────────────────────────────────────────────────────
+refreshAll();
+connectSSE();
+</script>
+</body>
+</html>
