@@ -26,26 +26,26 @@ console = Console()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 # SIRENE StockEtablissement — official monthly Parquet from data.gouv.fr
-# Updated every month, no auth, no rate limits, filter locally with DuckDB
+# Updated every month, no auth, no rate limits, filter locally with PyArrow
 # The resource ID is stable; data.gouv.fr redirects to the latest file automatically
-SIRENE_PARQUET_URL = "https://www.data.gouv.fr/fr/datasets/r/0651fb76-bcf3-4f6a-a38d-bc04fa708576"
+SIRENE_PARQUET_URL = "https://www.data.gouv.fr/fr/datasets/r/a29c1297-1f92-4e2a-8f6b-8c902ce96c5f"
 
 TECH_NAF_CODES = [
-    "6201Z",  # Software development
-    "6202A",  # IT consulting
-    "6202B",  # IT maintenance
-    "6203Z",  # IT infrastructure management
-    "6209Z",  # Other IT activities
-    "6311Z",  # Data processing / hosting
-    "6312Z",  # Web portals
-    "7022Z",  # Business consulting
-    "7112B",  # Engineering studies
+    "62.01Z",  # Software development
+    "62.02A",  # IT consulting
+    "62.02B",  # IT maintenance
+    "62.03Z",  # IT infrastructure management
+    "62.09Z",  # Other IT activities
+    "63.11Z",  # Data processing / hosting
+    "63.12Z",  # Web portals
+    "70.22Z",  # Business consulting
+    "71.12B",  # Engineering studies
 ]
 
 DEFAULT_DEPARTMENTS = ["33", "47", "40", "24", "17"]
 
 
-# ── SIRENE VIA DUCKDB + REMOTE PARQUET ───────────────────────────────────────
+# ── SIRENE VIA PYARROW + REMOTE PARQUET ───────────────────────────────────────
 
 def scan_sirene_local(
     departments: list[str],
@@ -72,12 +72,21 @@ def scan_sirene_local(
     local_path = data_dir / "sirene.parquet"
 
     if not local_path.exists():
-        console.print("[yellow]No local sirene.parquet found — downloading now (~600MB)…[/yellow]")
+        console.print("[yellow]No local sirene.parquet found — downloading now (~2.1GB)…[/yellow]")
         console.print("[dim]This only happens once. Future scans will be instant.[/dim]")
         _download_sirene_sync(local_path)
 
     if naf_codes is None:
         naf_codes = TECH_NAF_CODES
+
+    # Ensure NAF codes have dots (e.g. 6201Z -> 62.01Z)
+    processed_naf = []
+    for code in naf_codes:
+        if len(code) == 5 and "." not in code:
+            processed_naf.append(f"{code[:2]}.{code[2:]}")
+        else:
+            processed_naf.append(code)
+    naf_set = set(processed_naf)
 
     # Headcount codes that meet the minimum
     all_headcount = {
@@ -93,13 +102,13 @@ def scan_sirene_local(
         pf = pq.ParquetFile(local_path)
         companies = []
 
-        naf_set        = set(naf_codes)
         dept_set       = set(departments)
         headcount_set  = set(valid_headcount)
 
         needed_cols = [
             "siren", "siret",
             "denominationUsuelleEtablissement",
+            "enseigne1Etablissement",
             "activitePrincipaleEtablissement",
             "etatAdministratifEtablissement",
             "trancheEffectifsEtablissement",
@@ -115,7 +124,7 @@ def scan_sirene_local(
         cols = [c for c in needed_cols if c in available]
 
         total = 0
-        for batch in pf.iter_batches(batch_size=50_000, columns=cols):
+        for batch in pf.iter_batches(batch_size=100_000, columns=cols):
             tbl = batch.to_pydict()
             n = len(tbl["siren"])
             for i in range(n):
@@ -132,9 +141,13 @@ def scan_sirene_local(
                 hc   = (tbl["trancheEffectifsEtablissement"][i] or "")
                 if hc and hc not in headcount_set:
                     continue
-                name = (tbl["denominationUsuelleEtablissement"][i] or "").strip()
-                if not name:
-                    continue
+                
+                # Try multiple name fields
+                name = (
+                    (tbl["denominationUsuelleEtablissement"][i] or "") or 
+                    (tbl["enseigne1Etablissement"][i] or "") or
+                    f"Company {tbl['siren'][i]}" # Fallback
+                ).strip()
 
                 addr_parts = [
                     tbl.get("numeroVoieEtablissement", [None]*n)[i] or "",
@@ -146,12 +159,12 @@ def scan_sirene_local(
                     "siren":           tbl["siren"][i],
                     "siret":           tbl["siret"][i],
                     "naf_code":        naf,
-                    "naf_label":       NAF_LABELS.get(naf, ""),
+                    "naf_label":       NAF_LABELS.get(naf.replace(".", ""), ""),
                     "city":            tbl.get("libelleCommuneEtablissement", [None]*n)[i],
                     "department":      dept,
                     "address":         " ".join(p for p in addr_parts if p).strip(),
                     "headcount_range": _headcount_label(hc),
-                    "creation_year":   (tbl.get("dateCreationEtablissement", [None]*n)[i] or "")[:4] or None,
+                    "creation_year":   (str(tbl.get("dateCreationEtablissement", [None]*n)[i] or ""))[:4] or None,
                     "website":         None,
                     "source":          "sirene",
                     "status":          "NEW",
@@ -462,8 +475,11 @@ async def cmd_score(only_new: bool = False):
     """LLM-score companies that don't have a score yet."""
     from db import get_companies, update_company
 
-    companies = get_companies(status="NEW" if only_new else None, min_score=0)
-    unscored = [c for c in companies if c.get("relevance_score", 0) == 0]
+    # Fetch all companies with status NEW (if only_new) or any company
+    companies = get_companies(status="NEW" if only_new else None)
+    
+    # Unscored companies have relevance_score 0 or NULL
+    unscored = [c for c in companies if not c.get("relevance_score")]
 
     if not unscored:
         console.print("[dim]All companies already scored.[/dim]")
@@ -493,48 +509,94 @@ async def cmd_score(only_new: bool = False):
     console.print(f"[green]✓ Scored {scored} companies ({skipped} skipped)[/green]")
 
 
-async def cmd_enrich(batch_size: int = 20):
-    """Run Gemini CLI enrichment on NEW/uncontacted companies with score >= 5."""
+async def cmd_enrich(batch_size: int = 10):
+    """Run Gemini CLI enrichment one by one to avoid stalling."""
     from db import get_companies, update_company
     import subprocess
+    import tempfile
 
-    companies = [
+    # Prioritize NEW companies, then ENRICHING (previously failed/interrupted)
+    all_eligible = [
         c for c in get_companies(min_score=5)
         if c["status"] in ("NEW", "ENRICHING")
         and not c.get("contact_name")
-    ][:batch_size]
+    ]
+    
+    # Sort: NEW first, then ENRICHING
+    all_eligible.sort(key=lambda x: 0 if x["status"] == "NEW" else 1)
+    companies = all_eligible[:batch_size]
 
     if not companies:
         console.print("[yellow]No companies to enrich. Run scan first.[/yellow]")
         return
 
-    console.rule(f"[bold]Enriching {len(companies)} companies via Gemini + LinkedIn[/bold]")
-    prompt = build_enrichment_prompt(companies)
+    console.rule(f"[bold]Enriching {len(companies)} companies (Sequential mode)[/bold]")
+    
+    for i, company in enumerate(companies):
+        console.print(f"[{i+1}/{len(companies)}] Researching [bold]{company['name']}[/bold]...")
+        
+        # Build prompt for a single company
+        prompt = build_enrichment_prompt([company])
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
+            f.write(prompt)
+            prompt_path = f.name
 
-    # Save prompt
-    prompt_path = Path(__file__).parent / "data" / "prospect_enrichment_prompt.txt"
-    prompt_path.parent.mkdir(exist_ok=True)
-    prompt_path.write_text(prompt)
+        try:
+            # Mark as enriching
+            update_company(company["id"], {"status": "ENRICHING"})
+            
+            # Run gemini for this one company with real-time streaming
+            process = subprocess.Popen(
+                f'gemini --model gemini-2.5-flash < "{prompt_path}"',
+                shell=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                bufsize=1
+            )
+            
+            full_output = []
+            console.print(f"  [dim]── Researching {company['name']} ──[/dim]")
+            
+            # Stream output to console
+            if process.stdout:
+                for line in iter(process.stdout.readline, ""):
+                    clean_line = line.strip()
+                    if clean_line:
+                        # Print to user (dimmed to separate from UI)
+                        console.print(f"    [blue]>[/blue] [dim]{clean_line}[/dim]")
+                        full_output.append(line)
+            
+            process.wait()
+            output = "".join(full_output)
+            
+            # Save individual log for debugging
+            log_dir = Path(__file__).parent / "logs"
+            log_dir.mkdir(exist_ok=True)
+            log_path = log_dir / f"enrich_{company['id']}_{__import__('datetime').datetime.now().strftime('%H%M%S')}.log"
+            log_path.write_text(output)
 
-    log_path = Path(__file__).parent / "logs" / f"enrich_{__import__('datetime').datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-    log_path.parent.mkdir(exist_ok=True)
+            # Parse result from the captured output
+            parsed_count = _parse_enrichment_output(output)
+            
+            # If nothing was parsed, mark as PASS to avoid looping forever
+            if parsed_count == 0:
+                console.print(f"  [yellow]⚠ No structured data returned by LLM. Marking as PASS to avoid looping.[/yellow]")
+                update_company(company["id"], {"status": "PASS", "notes": (company.get("notes") or "") + " | Enrichment failed to return JSON"})
+            else:
+                # Check if it worked
+                updated = get_companies(search=company['name'])
+                if updated and updated[0].get('contact_name'):
+                    console.print(f"  [green]✓ Enriched: {updated[0]['contact_name']} ({updated[0]['contact_role']})[/green]")
+                
+        except Exception as e:
+            console.print(f"  [red]Error enriching {company['name']}: {e}[/red]")
+        finally:
+            if Path(prompt_path).exists():
+                os.unlink(prompt_path)
 
-    # Mark as enriching
-    for c in companies:
-        update_company(c["id"], {"status": "ENRICHING"})
-
-    console.print(f"  Prompt saved: {prompt_path}")
-    console.print(f"  Log: {log_path}\n")
-
-    cmd = f'gemini < "{prompt_path}" 2>&1 | tee "{log_path}"'
-    try:
-        subprocess.run(cmd, shell=True)
-    except KeyboardInterrupt:
-        console.print("\n[yellow]Interrupted. Parsing partial results...[/yellow]")
-
-    # Parse output
-    if log_path.exists():
-        _parse_enrichment_output(log_path.read_text())
+    console.print(f"\n[bold green]✓ Batch enrichment complete[/bold green]")
 
 
 def _parse_enrichment_output(output: str):
@@ -544,10 +606,12 @@ def _parse_enrichment_output(output: str):
     count = 0
     for line in output.splitlines():
         line = line.strip()
-        if not line.startswith("ENRICHED:"):
+        if "ENRICHED:" not in line:
             continue
         try:
-            data = json.loads(line[len("ENRICHED:"):].strip())
+            # Extract JSON part
+            json_str = line[line.find("ENRICHED:") + len("ENRICHED:"):].strip()
+            data = json.loads(json_str)
             cid = data.pop("id", None)
             if not cid:
                 continue
@@ -561,6 +625,7 @@ def _parse_enrichment_output(output: str):
             console.print(f"  [yellow]Parse error: {e}[/yellow]")
 
     console.print(f"\n[green]✓ Enriched {count} companies[/green]")
+    return count
 
 
 async def cmd_frenchtech(city: str):
@@ -598,16 +663,34 @@ def cmd_stats():
 
 
 async def _debug_auth():
-    """Test pyarrow can read the local SIRENE parquet."""
+    """Test pyarrow can read the local SIRENE parquet and find SOMETHING."""
     local = Path(__file__).parent / "data" / "sirene.parquet"
     if not local.exists():
-        console.print(f"[yellow]No local file yet. Run: python prospector.py download-sirene[/yellow]")
-        return
+        console.print(f"[yellow]No local file. Constructing a test from the mini-parquet...[/yellow]")
+        local = Path(__file__).parent / "data" / "test_rg0.parquet"
+        if not local.exists():
+             console.print("[red]No data files found to test.[/red]")
+             return
+
     try:
         import pyarrow.parquet as pq
         pf = pq.ParquetFile(local)
-        console.print(f"[green]✓ {local.name} — {pf.metadata.num_rows:,} rows, {local.stat().st_size//1024//1024}MB[/green]")
-        console.print(f"  Columns: {pf.schema_arrow.names[:8]}…")
+        console.print(f"[green]✓ {local.name} — {pf.metadata.num_rows:,} rows[/green]")
+        
+        # Check first 100 rows for name fields
+        batch = next(pf.iter_batches(batch_size=100))
+        tbl = batch.to_pydict()
+        
+        names_found = 0
+        for i in range(len(tbl["siren"])):
+            name = tbl.get("denominationUsuelleEtablissement", [None]*100)[i]
+            enseigne = tbl.get("enseigne1Etablissement", [None]*100)[i]
+            if name or enseigne:
+                console.print(f"Row {i}: Name={name}, Enseigne={enseigne}, NAF={tbl['activitePrincipaleEtablissement'][i]}")
+                names_found += 1
+        
+        console.print(f"Found {names_found} rows with some name/enseigne in first 100.")
+            
     except Exception as e:
         console.print(f"[red]✗ {e}[/red]")
 

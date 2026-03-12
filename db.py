@@ -297,7 +297,7 @@ def get_companies(
     search: str = None,
     min_score: int = 0,
 ) -> list[dict]:
-    query = "SELECT * FROM companies WHERE relevance_score >= ?"
+    query = "SELECT * FROM companies WHERE (relevance_score >= ? OR relevance_score IS NULL)"
     params = [min_score]
     if status:
         query += " AND status=?"
