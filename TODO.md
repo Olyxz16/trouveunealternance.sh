@@ -13,16 +13,16 @@
 - [x] Create `scraper/fetcher.py` (Jina + MCP fallback + cache)
 
 ## Phase 2: Pipeline & Parsers
-- [ ] Create `scraper/parsers/careers_page.py` (Generic company page parser)
-- [ ] Create `scraper/pipeline.py` (Extract pipeline logic from `scraper.py`)
-- [ ] Implement `@pipeline_step` decorator and `run_log` wiring
+- [x] Create `scraper/parsers/careers_page.py` (Generic company page parser)
+- [x] Create `scraper/pipeline.py` (Extract pipeline logic from `scraper.py`)
+- [x] Implement `@pipeline_step` decorator and `run_log` wiring
 
 ## Phase 3: Dashboard Updates
-- [ ] Update `api.py` with new endpoints (`/api/runs`, `/api/usage`, `/api/contacts`)
-- [ ] Update `index.html` with new tabs (Runs, Usage) and Scraping Health panel
+- [x] Update `api.py` with new endpoints (`/api/runs`, `/api/usage`, `/api/contacts`)
+- [x] Update `static/index.html` with new tabs (Runs, Usage) and Scraping Health panel
 
 ## Phase 4: Refactoring Existing Components
-- [ ] Update `classifier.py` to use `llm.py`
-- [ ] Update `prospector.py` to use `llm.py` and new `contacts` table
-- [ ] Update `emailer.py` to use `llm.py` and new `contacts` table
+- [x] Update `classifier.py` to use `llm.py`
+- [x] Update `prospector.py` to use `llm.py` and new `contacts` table
+- [x] Update `emailer.py` to use `llm.py` and new `contacts` table
 - [ ] Update `scheduler.py` (add nightly archive job)

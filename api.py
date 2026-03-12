@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from db import (
     init_db, get_jobs, get_job, update_job, get_stats, get_recent_activity, log_activity,
     get_companies, get_company, update_company, upsert_company, get_prospect_cities,
+    get_runs, get_run_detail, get_usage_today, get_usage_history, get_contacts, get_scraping_health
 )
 
 app = FastAPI(title="JobHunter API")
@@ -286,6 +287,38 @@ def export_prospects_tsv():
         media_type="text/tab-separated-values",
         headers={"Content-Disposition": "attachment; filename=prospects.tsv"}
     )
+
+
+# ── V1 RUNS & USAGE ──────────────────────────────────────────────────────────
+
+@app.get("/api/runs")
+def list_runs(limit: int = 50):
+    return get_runs(limit)
+
+
+@app.get("/api/runs/{run_id}")
+def get_run(run_id: str):
+    return get_run_detail(run_id)
+
+
+@app.get("/api/usage/today")
+def usage_today():
+    return get_usage_today()
+
+
+@app.get("/api/usage/history")
+def usage_history(days: int = 30):
+    return get_usage_history(days)
+
+
+@app.get("/api/health")
+def scraping_health():
+    return get_scraping_health()
+
+
+@app.get("/api/prospects/{company_id}/contacts")
+def list_contacts(company_id: int):
+    return get_contacts(company_id)
 
 
 # ── SSE ───────────────────────────────────────────────────────────────────────

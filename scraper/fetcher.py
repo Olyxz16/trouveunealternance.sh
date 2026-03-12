@@ -38,18 +38,19 @@ class Fetcher:
             except Exception as e:
                 print(f"  ⚠ Jina failed for {url}: {e}. Falling back to MCP...")
 
-        # 3. Try MCP
-        try:
-            result = await self._fetch_mcp(url)
-            if self._is_good_quality(result.content_md):
-                self._save_to_cache(result, cache_ttl)
-                return result
-            else:
-                raise EmptyContentError(url, "mcp")
-        except Exception as e:
-            if isinstance(e, EmptyContentError):
-                raise e
-            raise MCPError(url, str(e))
+        # 3. Try MCP (Disabled for now as it hangs/fails when no server present)
+        # try:
+        #     result = await self._fetch_mcp(url)
+        #     if self._is_good_quality(result.content_md):
+        #         self._save_to_cache(result, cache_ttl)
+        #         return result
+        #     else:
+        #         raise EmptyContentError(url, "mcp")
+        # except Exception as e:
+        #     if isinstance(e, EmptyContentError):
+        #         raise e
+        #     raise MCPError(url, str(e))
+        raise EmptyContentError(url, "jina (mcp disabled)")
 
     async def _fetch_jina(self, url: str) -> FetchResult:
         jina_url = f"https://r.jina.ai/{url}"

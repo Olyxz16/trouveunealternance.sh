@@ -376,15 +376,105 @@ def get_companies(
 
 
 def get_prospect_cities() -> list[dict]:
-    """Return distinct cities with company counts, for the sidebar."""
+    \"\"\"Return distinct cities with company counts, for the sidebar.\"\"\"
     with get_conn() as conn:
-        rows = conn.execute("""
+        rows = conn.execute(\"\"\"
             SELECT city, COUNT(*) as count
             FROM companies
             WHERE city IS NOT NULL AND city != ''
             GROUP BY city ORDER BY count DESC LIMIT 20
-        """).fetchall()
+        \"\"\").fetchall()
         return [dict(r) for r in rows]
+
+# ── RUNS & USAGE (V1) ────────────────────────────────────────────────────────
+
+def get_runs(limit: int = 50) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(\"\"\"
+            SELECT run_id, 
+                   MIN(ts) as start_time, 
+                   MAX(ts) as last_activity,
+                   COUNT(CASE WHEN status='ok' THEN 1 END) as ok_count,
+                   COUNT(CASE WHEN status='error' THEN 1 END) as error_count,
+                   COUNT(CASE WHEN status='needs_review' THEN 1 END) as review_count,
+                   COUNT(DISTINCT company_id) as companies_processed
+            FROM run_log
+            GROUP BY run_id
+            ORDER BY start_time DESC
+            LIMIT ?
+        \"\"\", (limit,)).fetchall()
+        return [dict(r) for r in rows]
+
+def get_run_detail(run_id: str) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(\"\"\"
+            SELECT l.*, c.name as company_name, j.title as job_title
+            FROM run_log l
+            LEFT JOIN companies c ON l.company_id = c.id
+            LEFT JOIN jobs j ON l.job_id = j.id
+            WHERE l.run_id = ?
+            ORDER BY l.ts ASC
+        \"\"\", (run_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+def get_usage_today() -> dict:
+    with get_conn() as conn:
+        row = conn.execute(\"\"\"
+            SELECT COUNT(*) as requests,
+                   SUM(prompt_tokens) as prompt_tokens,
+                   SUM(completion_tokens) as completion_tokens,
+                   SUM(cost_usd) as total_cost
+            FROM llm_usage
+            WHERE date(ts) = date('now')
+        \"\"\").fetchone()
+        return dict(row) if row else {\"requests\": 0, \"prompt_tokens\": 0, \"completion_tokens\": 0, \"total_cost\": 0}
+
+def get_usage_history(days: int = 30) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(\"\"\"
+            SELECT date(ts) as day,
+                   COUNT(*) as requests,
+                   SUM(prompt_tokens) as prompt_tokens,
+                   SUM(completion_tokens) as completion_tokens,
+                   SUM(cost_usd) as cost
+            FROM llm_usage
+            GROUP BY day
+            ORDER BY day DESC
+            LIMIT ?
+        \"\"\", (days,)).fetchall()
+        return [dict(r) for r in rows]
+
+def get_contacts(company_id: int) -> list[dict]:
+    with get_conn() as conn:
+        rows = conn.execute(\"\"\"
+            SELECT * FROM contacts WHERE company_id = ? ORDER BY created_at DESC
+        \"\"\", (company_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+def get_scraping_health() -> dict:
+    with get_conn() as conn:
+        jina_stats = conn.execute(\"\"\"
+            SELECT COUNT(*) as total,
+                   COUNT(CASE WHEN quality > 0.5 THEN 1 END) as healthy
+            FROM scrape_cache
+            WHERE method = 'jina' AND fetched_at > datetime('now', '-24 hours')
+        \"\"\").fetchone()
+        
+        mcp_count = conn.execute(\"\"\"
+            SELECT COUNT(*) FROM scrape_cache 
+            WHERE method = 'mcp' AND fetched_at > datetime('now', '-24 hours')
+        \"\"\").fetchone()[0]
+        
+        needs_review = conn.execute(\"\"\"
+            SELECT COUNT(*) FROM run_log WHERE status = 'needs_review'
+        \"\"\").fetchone()[0]
+        
+        return {
+            \"jina_total\": jina_stats[\"total\"],
+            \"jina_healthy\": jina_stats[\"healthy\"],
+            \"mcp_24h\": mcp_count,
+            \"needs_review_count\": needs_review
+        }
 
 
 if __name__ == "__main__":
