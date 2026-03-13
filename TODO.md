@@ -8,7 +8,7 @@
 - [x] 5. `internal/tui/stats_view.go`: Lip Gloss stats table
 - [x] 6. `internal/collector/sirene.go`: DuckDB shell-out + NAF/headcount filter + import to `companies`
 - [x] 7. `internal/enricher/classifier.go`: LLM scoring + TECH / TECH_ADJACENT / NON_TECH cap
-- [ ] 8. `internal/pipeline/engine.go`: Run + Step executor + run_log writes
+- [x] 8. `internal/pipeline/engine.go`: Run + Step executor + run_log writes
 - [ ] 9. `internal/scraper/jina.go`: Jina fetch + quality check
 - [ ] 10. `internal/scraper/mcp.go`: Blueprint MCP client
 - [ ] 11. `internal/scraper/fetcher.go`: Jina → MCP → NEEDS_REVIEW + cache
