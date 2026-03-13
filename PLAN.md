@@ -1,521 +1,856 @@
-# JobHunter — Technical Roadmap
+# JobHunter Go — Transition & Pipeline Architecture
 
-> Generated from planning session. All architectural decisions are locked.
-> Pick up any section and start building — context is fully preserved here.
-
----
-
-## Core Architecture Decisions
-
-| Concern | Decision |
-|---|---|
-| LLM provider | OpenRouter, OpenAI-compatible API, one model in `.env` for now |
-| Rate limit response | Exponential backoff + retry, no fallback model yet |
-| Public scraping | Jina first → MCP fallback → `NEEDS_REVIEW` if both fail |
-| Auth'd scraping | MCP directly (LinkedIn, etc.) |
-| Pipeline mode | Automatic by default, `--interactive` flag available |
-| Raw content storage | SQLite for recent runs, archive to `.md` on disk after 30 days |
-| MCP lifecycle | Started manually before pipeline runs — no daemon assumption |
+> This document covers: the Go pipeline tooling decision, the full pipeline
+> design across all four stages, how to handle browser automation, metrics,
+> and LLM cost tracking — and the concrete steps to rebuild the project.
 
 ---
 
-## Model Selection
+## 1. The Pipeline Tooling Question
 
-### Chosen Models
+You asked for "a Dagster equivalent for Go." The short answer is: **there isn't
+one worth using.** Here is why, and what to do instead.
 
-| Task | Model | Pricing (input/output per 1M tokens) | Reason |
-|---|---|---|---|
-| Classification | `openai/gpt-oss-120b:free` | $0 / $0 | Free tier, 131K context, native JSON, fast enough for bulk classification |
-| Everything else (default) | `google/gemini-2.5-flash-lite` | $0.10 / $0.40 | Best cost/quality balance for extraction; 1M context window; thinking toggle available |
+### What exists in Go
 
-### Why not the alternatives considered
-
-**LFM-2.5-1.2B-Thinking** — rejected. Too small (1.2B params) for reliable JSON schema compliance on messy Jina-fetched markdown. 32K context limit is hit easily by a rich job listing + system prompt + schema. Cost advantage disappears on retry overhead.
-
-**Gemini 2.5 Flash (full)** — same quality as Flash-Lite for these tasks, but output is $2.50/M vs $0.40/M. Since extraction tasks produce large JSON outputs, the output price dominates — Flash-Lite wins on cost with no meaningful quality trade-off.
-
-**DeepSeek V3.2** — strong model ($0.25/$0.38, 163K context), good fallback option. Loses to Flash-Lite only on context window (163K vs 1M) which matters when enriching companies with large LinkedIn pages. Keep as a fallback option in config.
-
-### Pricing Estimate (typical run, 50 companies)
-
-| Task | Model | Approx. cost |
+| Tool | Backed by | Problem |
 |---|---|---|
-| 50 classifications | gpt-oss-120b:free | $0.00 |
-| 50 extractions | gemini-2.5-flash-lite | ~$0.03 |
-| 20 enrichments | gemini-2.5-flash-lite | ~$0.02 |
-| 10 drafts (V2) | gemini-2.5-flash-lite | ~$0.01 |
-| **Total** | | **~$0.06** |
+| Temporal | Temporal server (Docker) | Needs a server, designed for distributed teams, enormous ops overhead for a single-user tool |
+| River | PostgreSQL | Requires Postgres — you're on SQLite |
+| Asynq / Machinery | Redis | Same: external broker required |
+| Watermill | Kafka / Redis / AMQP | Pub/sub framework, not a pipeline orchestrator |
 
-A full week of daily runs costs well under $1.
+None of these are a good fit. They all assume you're building a distributed
+system with multiple workers and external infrastructure.
 
-### Free Tier Limits (gpt-oss-120b:free)
+### What you actually need
 
-20 requests/minute, 200 requests/day. Fine for classification bursts. If you hit the daily cap, the `llm.py` client falls back to `gemini-2.5-flash-lite` automatically for that task (configured via `OPENROUTER_MODEL_CLASSIFY_FALLBACK`).
+Dagster's value for your use case comes down to three things:
 
-### Per-Task Config (future, zero code change)
+1. **Run tracking** — every pipeline execution has an ID, a start time, a status
+2. **Step tracking** — each step within a run has its own status, duration, error
+3. **Resumability** — if a run fails halfway, you can re-run only the failed steps
 
-```env
-OPENROUTER_MODEL_CLASSIFY=openai/gpt-oss-120b:free
-OPENROUTER_MODEL_CLASSIFY_FALLBACK=google/gemini-2.5-flash-lite
-OPENROUTER_MODEL_ENRICH=google/gemini-2.5-flash-lite
-OPENROUTER_MODEL_DRAFT=google/gemini-2.5-flash-lite
+You already have tables for this: `run_log`. The missing piece is a thin
+**pipeline engine** built directly on SQLite. This is 200–300 lines of Go, not
+a third-party service.
+
+### The design: a lightweight pipeline engine
+
+The core idea is a `Pipeline` struct that wraps steps, persists every state
+transition to SQLite, and exposes the same observability Dagster would give you
+— but with zero external dependencies.
+
+```
+Run
+ ├── Step: collect          (ok / error / skipped)
+ ├── Step: import           (ok / error / skipped)
+ ├── Step: enrich[company]  (ok / error / needs_review)
+ └── Step: generate[company](ok / error / skipped)
 ```
 
-Until then, set `OPENROUTER_MODEL=google/gemini-2.5-flash-lite` as the single default.
+Each step is a Go function with a fixed signature:
 
+```go
+type StepFn func(ctx context.Context, run *Run) error
 
+type Step struct {
+    Name    string
+    Fn      StepFn
+    Timeout time.Duration
+}
+```
 
-### On the Go Rewrite
+The engine runs steps in order, catches panics, writes to `run_log` on every
+state transition, and returns a structured result. Steps can be run in parallel
+with a configurable concurrency limit (e.g. 3 companies enriched at once).
 
-Don't do it in V1. The real bottleneck is network I/O (scraping, LLM calls) — Python asyncio handles that fine. Go would shine for single-binary deployment and long-running worker components. The right move: finish V1–V2 in Python, then optionally port the backend API + scheduler + llm client to Go for V2.5. The dashboard frontend stays the same either way.
+The dashboard (already built) reads from `run_log` and renders exactly this —
+which means **you already have the Dagster UI equivalent**, it just needs the
+Go engine writing to the same tables.
 
-**Key Go libraries when the time comes:** `chi` (router), `sqlc` (type-safe queries from SQL schema), `golang.org/x/time/rate` (rate limiter), OpenAI Go SDK (works with OpenRouter), `mattn/go-sqlite3`.
+**This is the approach. No third-party orchestrator needed.**
 
 ---
 
-## V1 — Production-Grade Core
+## 2. Browser Automation Decision
 
-### `errors.py` — Exception Hierarchy
+### Keep Blueprint MCP
 
-The first file to write. Everything else imports from it.
+Blueprint MCP is an HTTP server that proxies to your real Firefox session. Your
+Go code calls it the same way the Python code did: plain HTTP POST to
+`http://localhost:3000`. The session persistence (LinkedIn cookies, WTTJ login)
+is its core value — a headless Chrome library won't have this.
 
-```
-JobHunterError
-  ScrapingError
-    JinaError(url, status_code, response_preview)
-    MCPError(url, reason)
-    EmptyContentError(url, method)
-  LLMError
-    RateLimitError(retry_after: float, model: str)
-    ParseError(raw_response: str, expected_schema: str)
-    ModelError(model: str, status_code: int)
-  EnrichmentError(company_id: int, step: str)
-  DatabaseError
+```go
+// From Go, calling Blueprint MCP is just:
+resp, err := http.Post("http://localhost:3000/browser/navigate",
+    "application/json",
+    strings.NewReader(`{"url": "https://linkedin.com/company/acme"}`))
 ```
 
-Every pipeline function returns a `Result[T]` — either `Ok(value)` or `Err(error)` — instead of raising. A `@pipeline_step(run_id, company_id, step_name)` decorator wraps any function, catches exceptions, writes to `run_log`, and converts raises into `Err`. The pipeline loop inspects results and continues — it never crashes on a single company failure.
+### When to use what
 
-After 3 consecutive `Err` entries for the same `(company_id, step)`, that company gets status `FAILED` and is excluded from future runs until manually reset via the dashboard or CLI.
+Jina (`r.jina.ai/{url}`) and Cloudflare Browser Rendering both convert pages to
+markdown, but they are not equivalent for this use case. Jina is a managed proxy
+with zero config — prepend it to any URL and get markdown back. Cloudflare
+requires an account, API token, and per-browser-second billing. Critically,
+**neither bypasses bot detection** — both are identified as bots by sites that
+care. For anything that requires a logged-in session (LinkedIn), both fail
+identically. Blueprint MCP is irreplaceable for those cases.
 
----
+Use Jina for the cheap first pass. Use MCP when sessions matter. Never reach for
+Cloudflare Browser Rendering — it adds account complexity for no gain here.
 
-### `llm.py` — OpenRouter Client
+| Source | Method | Reason |
+|---|---|---|
+| Company website / careers page | Jina (`r.jina.ai/{url}`) | Zero config, fast, sufficient for static/lightly dynamic pages |
+| LinkedIn company page | Blueprint MCP | Requires real session, anti-bot |
+| LinkedIn People tab | Blueprint MCP | Requires real session |
+| WTTJ job listings (V3) | Jina first, MCP fallback | Usually works without auth |
+| Indeed France (V3) | Jina first, MCP fallback | Usually works without auth |
 
-```python
-class LLMClient:
-    async def complete(self, system: str, user: str) -> str
-    async def complete_json(self, system: str, user: str, schema: type[BaseModel]) -> BaseModel
+### LLM provider interface
+
+Rather than hardcoding OpenRouter calls and bolting Gemini CLI on as a special
+case, model every LLM backend as an implementation of a single `Provider`
+interface. The client sits above it and owns all cross-cutting concerns: rate
+limiting, retry, usage logging. Swapping providers — or falling back — requires
+zero changes outside `internal/llm`.
+
+```go
+// internal/llm/provider.go
+
+type CompletionRequest struct {
+    System    string
+    User      string
+    MaxTokens int
+    JSONMode  bool
+}
+
+type CompletionResponse struct {
+    Content          string
+    PromptTokens     int
+    CompletionTokens int
+    CostUSD          float64
+    EstimatedCost    bool   // true when cost is estimated, not exact (Gemini CLI)
+}
+
+type Provider interface {
+    Complete(ctx context.Context, req CompletionRequest) (CompletionResponse, error)
+    Name() string
+}
 ```
 
-**Rate limiter:** Token bucket, one bucket total. Configured by `OPENROUTER_RPM` in `.env` (default 60). `asyncio.Semaphore` limits concurrent in-flight requests.
+Three implementations, all satisfying the same interface:
 
-**Retry logic:** On 429, read `Retry-After` header if present, otherwise exponential backoff starting at 2s, multiplied by 2 with ±20% jitter, capped at 120s. Max 4 retries, then raises `RateLimitError`. On 5xx, same backoff but only 2 retries then raises `ModelError`.
+```go
+// internal/llm/openrouter.go
+type OpenRouterProvider struct { /* api key, model, http client */ }
+// Returns exact token counts + cost from API response headers.
 
-**`complete_json`:** Uses OpenRouter's `response_format: {type: "json_object"}` where supported. Parses with Pydantic. On `ValidationError` or `JSONDecodeError`, retries once with the error appended to the prompt. Second failure raises `ParseError` with raw response stored for debugging.
+// internal/llm/gemini_cli.go
+type GeminiCLIProvider struct { BinaryPath string }
+// Pipes prompt to stdin of the `gemini` binary, captures stdout.
+// EstimatedCost: true. Token count estimated as (chars / 4).
+// Note: Gemini CLI is interactive by design — keep prompts fully
+// self-contained so it never pauses waiting for input.
 
-**Usage tracking:** Every response writes `(run_id, task, model, prompt_tokens, completion_tokens, cost_usd)` to `llm_usage`. OpenRouter returns `usage` and `x-openrouter-cost` on every response.
+// internal/llm/openai.go  (future-proofing, trivial to add)
+type OpenAIProvider struct { /* api key, model */ }
+```
 
-**Config in `.env`:**
+The `Client` wraps any `Provider` and handles everything else:
+
+```go
+// internal/llm/client.go
+
+type Client struct {
+    provider Provider
+    limiter  *rate.Limiter
+    db       *db.DB
+    logger   *zap.Logger
+}
+
+func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runID string) (CompletionResponse, error) {
+    // 1. Wait for rate limiter token
+    // 2. Call provider (with retry + exponential backoff on 429/5xx)
+    // 3. Log usage to correct table based on resp.EstimatedCost
+    // 4. Return response
+}
+
+func (c *Client) CompleteJSON(ctx context.Context, req CompletionRequest, task, runID string, target any) error {
+    // Complete → json.Unmarshal into target
+    // On failure: retry once with error appended to prompt
+}
+
+func (c *Client) logUsage(resp CompletionResponse, task, runID string) {
+    if resp.EstimatedCost {
+        c.db.InsertGeminiUsage(runID, task, resp.PromptTokens, resp.CompletionTokens)
+    } else {
+        c.db.InsertLLMUsage(runID, task, c.provider.Name(), resp.PromptTokens, resp.CompletionTokens, resp.CostUSD)
+    }
+}
+```
+
+Usage logging is unified through `logUsage` regardless of which provider ran.
+The dashboard Usage tab queries both `llm_usage` (exact) and `gemini_usage`
+(estimated) and renders them together — "OpenRouter: $0.06 / Gemini CLI: ~3 200 tokens estimated."
+
+**Fallback wiring:** the pipeline configures a primary provider (OpenRouter) and
+an optional fallback (Gemini CLI). If OpenRouter returns a hard error after
+retries exhausted, the client transparently retries on the fallback provider
+and logs which one was actually used. Configured in `.env`:
+
 ```env
+LLM_PRIMARY=openrouter
+LLM_FALLBACK=gemini_cli          # leave empty to disable fallback
 OPENROUTER_API_KEY=sk-or-...
-OPENROUTER_MODEL=google/gemini-2.5-flash-lite   # single default model
-OPENROUTER_RPM=60
-OPENROUTER_MAX_TOKENS=2048
-```
-
-**Per-task model config (future)** — add these keys and the client picks them up automatically, zero code change:
-```env
-OPENROUTER_MODEL_CLASSIFY=openai/gpt-oss-120b:free
-OPENROUTER_MODEL_CLASSIFY_FALLBACK=google/gemini-2.5-flash-lite
-OPENROUTER_MODEL_ENRICH=google/gemini-2.5-flash-lite
-OPENROUTER_MODEL_DRAFT=google/gemini-2.5-flash-lite
+OPENROUTER_MODEL=google/gemini-2.5-flash-lite
+GEMINI_CLI_PATH=gemini           # binary name if on PATH, or full path
 ```
 
 ---
 
-### `scraper/fetcher.py` — Jina → MCP → `NEEDS_REVIEW`
+## 3. The Four Pipeline Stages
 
-```python
-async def fetch_url(url: str, *, force_mcp: bool = False) -> FetchResult
+### Stage 1 — Data Collection
 
-@dataclass
-class FetchResult:
-    url: str
-    content_md: str
-    method: Literal["jina", "mcp", "cache"]
-    fetched_at: datetime
-    quality_score: float  # 0.0–1.0
+**What it does:** Pull company data from external sources into a staging area.
+
+**Sources:**
+- SIRENE Parquet (`data/sirene.parquet`) — already downloaded, read locally
+- `recherche-entreprises.api.gouv.fr` — free API, no auth, returns dirigeants
+- French Tech 5000 CSV (optional one-time import)
+
+**Go implementation:**
+
+```
+internal/collector/
+  sirene.go          — stream Parquet, filter by dept + NAF + headcount
+  recherche.go       — HTTP client for recherche-entreprises API
+  frenchtech.go      — CSV import
 ```
 
-**Flow:**
-1. Check `scrape_cache` — if found and not expired, return immediately with `method="cache"`
-2. Try Jina: `GET https://r.jina.ai/{url}`, quality check (length > 800 chars, no error strings, expected content signals present)
-3. If Jina fails quality check → try MCP (`browser_navigate` + `browser_get_content` via `http://localhost:3000`)
-4. If MCP unreachable → raise `MCPError` immediately (don't silently fail)
-5. If both fail → write `run_log` entry with `status=needs_review`, return `Err(EmptyContentError)`
-6. On success → write to `scrape_cache` with appropriate TTL
+SIRENE Parquet reading in Go: use `xitongsys/parquet-go` for pure-Go streaming
+reads. It handles the 2GB file in batches. Alternatively, shell out to DuckDB
+(`duckdb -c "SELECT ... FROM 'sirene.parquet' WHERE ..."`) if the Parquet
+library is painful — DuckDB has a static binary, zero config.
 
-**Archive job** (runs nightly via `scheduler.py`): moves `scrape_cache` rows older than 30 days to `data/cache/{YYYY-MM}/{domain}/{hash}.md` and deletes them from SQLite.
+**Output:** Raw company rows written to a `staging_companies` table (not yet
+deduplicated or classified). The stage completes when all sources are exhausted.
 
-**Domain TTL config in `.env`:**
-```env
-JINA_CACHE_TTL_DEFAULT=86400             # 24h — company career pages
-MCP_HOST=http://localhost:3000
+---
+
+### Stage 2 — Import & Pre-filter
+
+**What it does:** Move staging rows into `companies`, deduplicate by SIREN,
+apply the two-step classification heuristic, discard obvious non-tech.
+
+**Steps:**
+1. Dedup by SIREN (or name+city if no SIREN)
+2. Apply NAF heuristic:
+   - NAF 62xx / 63xx → `company_type = TECH`, pass through
+   - Non-tech NAF + headcount ≥ 100 → `company_type = UNKNOWN`, pass through for LLM check
+   - Non-tech NAF + headcount < 100 → `status = NOT_TECH`, skip
+3. For `UNKNOWN` rows: call LLM classifier (`gpt-oss-120b:free`, free tier) to
+   confirm `TECH_ADJACENT` or `NON_TECH`
+4. Cap `relevance_score` at 7 for `TECH_ADJACENT`
+5. Set `status = NEW` for passing companies
+
+**Output:** `companies` table populated, each row has `company_type` set,
+`NOT_TECH` companies marked and excluded from further stages.
+
+---
+
+### Stage 3 — Enrichment Pipeline (the core)
+
+This is the most important stage and the one that was never properly implemented
+in Python. For each company with `status = NEW` and no `primary_contact_id`:
+
+```
+For each company:
+  3a. Discover URLs
+  3b. Fetch content (Jina → MCP → NEEDS_REVIEW)
+  3c. Extract structured data (LLM)
+  3d. Find contacts (LLM + MCP LinkedIn search)
+  3e. Save results
 ```
 
+**3a. Discover URLs**
+
+If the company has no `website` or `linkedin_url`, try to find them:
+- Query `recherche-entreprises.api.gouv.fr/{siren}` — sometimes returns website
+- Search Jina: `https://r.jina.ai/search?q={company_name}+{city}+site:linkedin.com`
+- Fallback: construct LinkedIn search URL and fetch via MCP
+
+**3b. Fetch content**
+
+Ordered by cost (cheapest first):
+1. Check `scrape_cache` (SQLite) — if fresh, return immediately
+2. Try Jina for company website / careers page
+3. Try MCP (Blueprint) for LinkedIn company page — always needed for contacts
+4. If both fail → `status = NEEDS_REVIEW`, log to `run_log`, continue to next company
+
+Cache TTL: 24h for career pages, 7 days for LinkedIn company pages (they change
+slowly), 1h for job board listings (V3).
+
+**3c. Extract structured data**
+
+Send fetched markdown to `careers_page.go` parser:
+
+```go
+type RawCompanyPage struct {
+    Name                  string   `json:"name"`
+    Description           string   `json:"description"`
+    City                  string   `json:"city"`
+    Headcount             string   `json:"headcount"`
+    TechStack             []string `json:"tech_stack"`
+    GithubOrg             string   `json:"github_org"`
+    EngineeringBlogURL    string   `json:"engineering_blog_url"`
+    OpenSourceMentioned   bool     `json:"open_source_mentioned"`
+    InfraKeywords         []string `json:"infrastructure_keywords"`
+    CompanyType           string   `json:"company_type"`   // TECH | TECH_ADJACENT | NON_TECH
+    HasInternalTechTeam   bool     `json:"has_internal_tech_team"`
+    TechTeamSignals       []string `json:"tech_team_signals"`
+}
+```
+
+Write back to `companies`. Update `relevance_score`.
+
+**3d. Find contacts**
+
+This is the most valuable and most fragile step. Strategy by company type:
+
+| company_type | Target role | Method |
+|---|---|---|
+| `TECH` | CTO / Engineering Manager / Tech Lead | LinkedIn People tab via MCP |
+| `TECH_ADJACENT` | IT Director / Infrastructure Manager / CIO | LinkedIn People tab via MCP |
+| Either | Technical recruiter (fallback) | LinkedIn People tab via MCP |
+
+MCP flow for LinkedIn contact discovery:
+1. Navigate to company LinkedIn page via MCP
+2. Click "People" tab
+3. Search within company for "CTO" / "infrastructure" / "engineering"
+4. Extract top 3 results: name, role, LinkedIn URL
+5. For each result: check if public email visible on their profile
+6. Pass results to LLM to pick the best contact given company type
+
+Write each found contact to `contacts` table. Set `primary_contact_id` on
+`companies` for the highest-confidence contact.
+
+**3e. Save and advance status**
+
+```
+contact found    → status = TO_CONTACT
+no contact       → status = NO_CONTACT_FOUND (try guess-emails later)
+fetch failed     → status = NEEDS_REVIEW
+3 failures same step → status = FAILED (excluded from future runs)
+```
+
+**Concurrency:** Run enrichment for N companies in parallel (default N=3,
+configurable). Each company gets its own goroutine. Rate limiter is shared
+across all goroutines via `golang.org/x/time/rate`.
+
 ---
 
-### `scraper/parsers/` — Company Page Extraction
+### Stage 4 — Application Generation
 
-V1 only needs one parser: `careers_page.py`, a generic parser for company career pages and LinkedIn profiles. Job board parsers (WTTJ, Indeed, Lesjeudis) are a V3 concern.
+For each company with `status = TO_CONTACT` and no existing drafts:
 
-Each parser receives fetched markdown and returns a Pydantic model. The LLM does the extraction — parsers provide site-specific system prompts.
+**4a. Career page letter** (if `careers_page_url` is set)
 
-`RawCompanyPage` fields:
-- name, description, city, headcount
-- tech_stack, github_org, engineering_blog_url
-- open_source_mentioned, infrastructure_keywords
-- contact_name, contact_role, contact_linkedin, contact_email
-- `company_type`: `TECH` | `TECH_ADJACENT` | `NON_TECH`
-- `has_internal_tech_team`: bool — true if non-tech company with evidence of an internal IT/infra/dev team
-- `tech_team_signals`: list of strings — evidence found (e.g. "posts DevOps job listings", "has a /tech blog", "digital subsidiary mentioned")
+A formal but personal application letter, structured for a career page form or
+email to a generic address. Inputs: company description, tech stack,
+`tech_team_signals`, `profile.json`.
 
----
+**4b. Cold email per contact**
 
-### Company Type Classification
+One email draft per contact in `contacts` table. Angle varies:
+- `TECH` + CTO/tech lead → technically specific, reference their stack
+- `TECH` + HR → impact and fit angle
+- `TECH_ADJACENT` + IT director → internal tooling, adaptability, infra interest
 
-This is a three-tier problem, not binary. The classifier must distinguish:
+**4c. LinkedIn hook per contact**
 
-| Type | Definition | Examples | Internship angle |
-|---|---|---|---|
-| `TECH` | Core business is software/infra — the product IS tech | SaaS, cloud providers, dev tools, DevOps shops | Direct: they have an engineering team by definition |
-| `TECH_ADJACENT` | Non-tech business but large enough to have an internal IT/infra/dev team | Retailer with a tech division, logistics company running their own platform, hospital with an IT department | Indirect: target the internal team, not the product team |
-| `NON_TECH` | No meaningful technical needs at intern level | Law firm, bakery, small accountancy | Skip |
+≤ 280 chars. Opening line references something specific about their profile or
+company. Generated in the same LLM call as the email to save cost.
 
-The `TECH_ADJACENT` category is the important new addition. A company like Leroy Merlin, SNCF, or a mid-size regional bank isn't a tech company — but they absolutely have DevOps engineers, infrastructure teams, and internal platforms. These are valid prospects that the current binary filter discards entirely.
+All drafts written to `drafts` table with `status = draft`. The dashboard
+shows them for review and one-click send.
 
-**Signals for `TECH_ADJACENT`:**
-- Large headcount (100+) in a non-tech NAF code
-- Has a known digital subsidiary or "digital transformation" mentions
-- Job postings for infra/dev roles despite non-tech primary activity
-- Has a `.io` or tech-looking careers page despite non-tech sector
-
-**How it affects the pipeline:**
-
-Classification happens in two stages:
-
-1. **SIRENE pre-filter (heuristic, free):** NAF code alone. Pure `TECH` NAF codes (62xx, 63xx) pass automatically. Non-tech NAF codes with headcount ≥ 100 go to the LLM for `TECH_ADJACENT` evaluation. Non-tech NAF codes with headcount < 100 are skipped without an LLM call.
-
-2. **LLM classifier (on enrichment):** Given company description + website content, outputs `company_type` + `has_internal_tech_team` (bool) + `tech_team_signals` (list). This refines the heuristic and catches edge cases.
-
-**Scoring adjustments by type:**
-- `TECH`: score 1–10 based on stack relevance as before
-- `TECH_ADJACENT`: score capped at 7 (harder to land, longer shot) — but still worth contacting if score ≥ 5
-- `NON_TECH`: score 0, status → `NOT_TECH`, excluded from enrichment
-
-**Contact strategy differs by type (V2):**
-- `TECH`: target CTO / tech lead / engineering manager
-- `TECH_ADJACENT`: target IT director / infrastructure manager / CIO — NOT the general HR team
+**Provider fallback:** if OpenRouter exhausts retries, the client automatically
+retries on the configured fallback provider (Gemini CLI). The calling code in
+`generator/drafts.go` sees a single `client.CompleteJSON()` call — the fallback
+is transparent. Usage is logged to the correct table either way.
 
 ---
 
-### Database — Migration Files
+## 4. Metrics & Cost Tracking
 
-Applied in order by `db.py` on startup. A `schema_migrations` table tracks which have run.
+### Unified through the LLM client
 
-#### `001_contacts.sql`
+All usage logging — regardless of provider — flows through `client.logUsage()`
+in `internal/llm/client.go`. The `CompletionResponse.EstimatedCost` bool
+determines which table gets the write:
+
+```
+OpenRouter call  →  resp.EstimatedCost = false  →  INSERT INTO llm_usage    (exact tokens + cost)
+Gemini CLI call  →  resp.EstimatedCost = true   →  INSERT INTO gemini_usage  (estimated tokens)
+```
+
+No separate tracking path. No special-casing in calling code. The provider
+abstraction means the pipeline never knows or cares which backend ran.
+
+### `llm_usage` — exact (OpenRouter)
 
 ```sql
-CREATE TABLE contacts (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  company_id   INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
-  name         TEXT,
-  role         TEXT,
-  email        TEXT,
-  linkedin_url TEXT,
-  source       TEXT CHECK(source IN ('linkedin','careers_page','manual','guessed')),
-  confidence   TEXT CHECK(confidence IN ('verified','probable','guessed')),
-  status       TEXT NOT NULL DEFAULT 'active'
-               CHECK(status IN ('active','bounced','unsubscribed','do_not_contact')),
-  notes        TEXT,
-  created_at   TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at   TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX idx_contacts_company ON contacts(company_id);
-CREATE INDEX idx_contacts_email   ON contacts(email);
-
--- Migrate existing data
-INSERT INTO contacts (company_id, name, role, email, linkedin_url, source, confidence)
-SELECT id, contact_name, contact_role, contact_email, contact_linkedin,
-       'linkedin', 'probable'
-FROM companies
-WHERE contact_name IS NOT NULL OR contact_email IS NOT NULL;
-
-ALTER TABLE companies ADD COLUMN primary_contact_id INTEGER REFERENCES contacts(id);
-
-UPDATE companies SET primary_contact_id = (
-  SELECT id FROM contacts WHERE company_id = companies.id LIMIT 1
-);
-
--- Add company type classification
-ALTER TABLE companies ADD COLUMN company_type TEXT DEFAULT 'UNKNOWN'
-  CHECK(company_type IN ('TECH', 'TECH_ADJACENT', 'NON_TECH', 'UNKNOWN'));
-ALTER TABLE companies ADD COLUMN has_internal_tech_team INTEGER DEFAULT NULL; -- boolean
-ALTER TABLE companies ADD COLUMN tech_team_signals TEXT; -- comma-separated evidence
+run_id, step, model, prompt_tokens, completion_tokens, cost_usd, ts
 ```
 
-#### `002_run_log.sql`
+OpenRouter returns exact token counts and cost on every response via the
+`usage` field and `x-openrouter-cost` header.
+
+### `gemini_usage` — estimated (Gemini CLI)
+
+Since Gemini CLI returns no token counts, estimate from character count:
+~4 chars per token is a reasonable approximation for French/English mixed text.
 
 ```sql
-CREATE TABLE run_log (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  run_id      TEXT NOT NULL,
-  company_id  INTEGER REFERENCES companies(id),
-  job_id      INTEGER REFERENCES jobs(id),
-  step        TEXT NOT NULL,
-  status      TEXT NOT NULL CHECK(status IN ('ok','error','skipped','needs_review')),
-  error_type  TEXT,
-  error_msg   TEXT,
-  duration_ms INTEGER,
-  ts          TEXT NOT NULL DEFAULT (datetime('now'))
+CREATE TABLE gemini_usage (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  run_id           TEXT,
+  step             TEXT,
+  prompt_tokens    INTEGER,   -- estimated: prompt_chars / 4
+  completion_tokens INTEGER,  -- estimated: response_chars / 4
+  ts               TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE INDEX idx_run_log_run_id     ON run_log(run_id);
-CREATE INDEX idx_run_log_company_id ON run_log(company_id);
-CREATE INDEX idx_run_log_status     ON run_log(status);
 ```
 
-#### `003_llm_usage.sql`
+The dashboard Usage tab queries both tables and renders them side by side:
+"OpenRouter: $0.06 exact · Gemini CLI: ~3 200 tokens estimated."
+
+### Pipeline run metrics
+
+The existing `run_log` table covers per-step observability. Add a `pipeline_runs`
+summary table for the run-level view:
 
 ```sql
-CREATE TABLE llm_usage (
-  id                INTEGER PRIMARY KEY AUTOINCREMENT,
-  run_id            TEXT,
-  step              TEXT,
-  model             TEXT NOT NULL,
-  prompt_tokens     INTEGER,
-  completion_tokens INTEGER,
-  cost_usd          REAL,
-  ts                TEXT NOT NULL DEFAULT (datetime('now'))
-);
-CREATE INDEX idx_llm_usage_ts ON llm_usage(ts);
-```
-
-#### `004_scrape_cache.sql`
-
-```sql
-CREATE TABLE scrape_cache (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  url         TEXT NOT NULL UNIQUE,
-  method      TEXT NOT NULL CHECK(method IN ('jina','mcp','manual')),
-  content_md  TEXT NOT NULL,
-  quality     REAL NOT NULL DEFAULT 1.0,
-  fetched_at  TEXT NOT NULL DEFAULT (datetime('now')),
-  expires_at  TEXT NOT NULL
-);
-CREATE INDEX idx_scrape_cache_url        ON scrape_cache(url);
-CREATE INDEX idx_scrape_cache_expires_at ON scrape_cache(expires_at);
-```
-
----
-
-### Dashboard — V1 New Panels
-
-Single-file `index.html` gains two new tabs and one new sidebar panel.
-
-**Runs tab** (`GET /api/runs`, `GET /api/runs/{run_id}`):
-- Table of pipeline runs, newest first
-- Per-run: run ID, start time, duration, companies processed, ok/error/skipped/needs_review counts
-- Click to expand: per-company × per-step grid, color-coded (green/red/yellow/grey)
-- Error cells: tooltip with `error_type: error_msg` on hover
-- `NEEDS_REVIEW` cells: link to company detail panel
-
-**Usage tab** (`GET /api/usage/today`, `GET /api/usage/history`):
-- Today: total requests, total tokens, total cost USD, rate limit hits, parse errors
-- Hourly cost bar chart (pure SVG, no library)
-- 30-day history table with daily totals
-
-**Scraping health panel** (sidebar, not a tab):
-- Jina success rate last 24h (e.g. "47/52 ok")
-- MCP calls last 24h
-- `NEEDS_REVIEW` queue count with link to filtered prospects view
-- Refreshes every 30s via lightweight poll
-
-**Contacts panel in company detail:**
-- List of contacts with name, role, source badge, confidence badge, status badge
-- Primary contact marked with star
-- Company type badge (`TECH` / `TECH_ADJACENT` / `NON_TECH`) shown prominently in header
-- For `TECH_ADJACENT` companies: a note showing the `tech_team_signals` that justified inclusion
-- Read-only in V1 — contacts managed by enrichment pipeline
-- "Re-enrich" button triggers enrichment for this specific company
-
----
-
-## V2 — Cold Outreach Engine
-
-### New `drafts` Table
-
-```sql
-CREATE TABLE drafts (
-  id           INTEGER PRIMARY KEY AUTOINCREMENT,
-  company_id   INTEGER NOT NULL REFERENCES companies(id),
-  contact_id   INTEGER REFERENCES contacts(id),
-  type         TEXT NOT NULL CHECK(type IN ('email','linkedin')),
-  subject      TEXT,
-  body         TEXT NOT NULL,
-  model        TEXT,
-  prompt_hash  TEXT,
-  status       TEXT NOT NULL DEFAULT 'draft'
-               CHECK(status IN ('draft','edited','sent','bounced')),
-  generated_at TEXT NOT NULL DEFAULT (datetime('now')),
-  edited_at    TEXT,
-  sent_at      TEXT
+CREATE TABLE pipeline_runs (
+  run_id         TEXT PRIMARY KEY,
+  started_at     TEXT NOT NULL,
+  finished_at    TEXT,
+  status         TEXT NOT NULL DEFAULT 'running'
+                 CHECK(status IN ('running','done','failed','partial')),
+  companies_processed INTEGER DEFAULT 0,
+  contacts_found      INTEGER DEFAULT 0,
+  drafts_generated    INTEGER DEFAULT 0,
+  llm_cost_usd        REAL DEFAULT 0,
+  error_count         INTEGER DEFAULT 0
 );
 ```
 
-### Generation
-
-Inputs per draft: company description, tech stack, linked job postings (from V3 or empty), contact name + role, and `profile.json` (your resume as structured data — projects, skills, school, availability). LLM picks the 2–3 most relevant signals per company. Email and LinkedIn message generated in one call, stored as two separate `drafts` rows.
-
-Draft generation is per-contact, not per-company. The angle varies by both contact role and company type:
-- `TECH` company + CTO/tech lead → technically-angled, stack-specific
-- `TECH` company + HR → impact/team-fit angle
-- `TECH_ADJACENT` company → emphasise ability to work in a non-pure-tech environment, interest in internal tooling and infrastructure, adaptability
-
-### Dashboard Outreach UI
-
-In the company detail panel, an **Outreach** section:
-- Inline editable textarea (saves on blur via `PATCH /api/drafts/{id}`)
-- Regenerate button with optional instruction hint (e.g. "be more casual")
-- Send email: calls `/api/drafts/{id}/send` → SMTP
-- LinkedIn message: "Copy + Open Profile" button — copies text, opens contact's LinkedIn URL in new tab
-- Status timeline: Draft → Edited → Sent → Replied with timestamps
-
-### Follow-up Tracking
-
-`follow_ups` table. At 7 days post-send, company surfaces for follow-up nudge. LLM generates short follow-up referencing the first message (stored in `drafts`).
-
-### Email Sending
-
-SMTP stays as primary. `EMAIL_PROVIDER=smtp|resend` config flag for optional Resend API.
+The dashboard sidebar shows the last N runs with these summary counts. Clicking
+a run shows the per-step `run_log` grid (already implemented in `index.html`).
 
 ---
 
-## V2.5 — Optional Go Migration
-
-Port `api.py` + `scheduler.py` + `llm.py` + `db.py` to Go. Keep scraper in Python if MCP integration is easier there. Both processes share the SQLite file.
-
-**Go libraries:** `chi`, `sqlc`, `golang.org/x/time/rate`, OpenAI Go SDK, `mattn/go-sqlite3`.
-
----
-
-## V3 — Job Opportunity Scraping
-
-### Sources (priority order)
-1. Welcome to the Jungle — best structured data
-2. Indeed France — high volume
-3. LinkedIn Jobs — richest but restricted, use MCP session
-4. Lesjeudis — smaller, less competitive
-
-### Architecture
-
-Each source is a `scraper/parsers/{site}.py` plugin with:
-- `search(query: str, location: str) -> list[str]` — returns listing URLs
-- `parse_listing(md: str) -> RawListing` — extracts structured data
-
-Jina for WTTJ, Indeed, Lesjeudis. MCP for LinkedIn Jobs.
-
-### Company Linking
-
-Fuzzy match scraped company names against `companies` table using `rapidfuzz.fuzz.token_sort_ratio`, threshold 85. Matches link the job to the company and increment `relevance_score` by 1 (capped at 10).
-
-Dashboard "hot leads" filter: companies with both a contact found AND a recent matched job posting.
-
-Draft generation (V2) automatically pulls the most recent matched posting as context.
-
----
-
-## Final File Structure
+## 5. Go Project Structure
 
 ```
 jobhunter/
-  jobhunter.py             CLI entry point (interface unchanged)
-  errors.py                ← NEW: exception hierarchy + Result type
-  llm.py                   ← NEW: OpenRouter client, rate limiter, usage tracking
-  db.py                    ← UPDATED: migration runner added
-  classifier.py            ← UPDATED: uses llm.py
-  emailer.py               ← UPDATED: uses llm.py, contacts table
-  guesser.py               (unchanged)
-  prospector.py            ← UPDATED: uses llm.py, contacts table
-  scheduler.py             ← UPDATED: + nightly archive job
-  api.py                   ← UPDATED: + /api/runs, /api/usage, /api/contacts endpoints
-  scraper/
-    __init__.py
-    fetcher.py             ← NEW: Jina → MCP fallback, cache
-    pipeline.py            ← EXTRACTED from scraper.py
-    parsers/
-      __init__.py
-      careers_page.py      ← NEW: generic company/LinkedIn page parser
-      # wttj.py, indeed.py, lesjeudis.py → V3
+  cmd/
+    jobhunter/
+      main.go               ← cobra root command + subcommand registration
+  internal/
+    tui/
+      pipeline_view.go      ← Bubble Tea model for scan / enrich / generate (live per-company progress)
+      scheduler_view.go     ← Bubble Tea model for schedule (countdown + last run summary)
+      stats_view.go         ← Lip Gloss static render for stats (no event loop needed)
+      setup_view.go         ← Huh multi-step form for first-time setup
+      common.go             ← shared styles (Lip Gloss), colour palette, helper renderers
+    pipeline/
+      engine.go             ← Run, Step, pipeline executor, concurrency
+      step.go               ← StepFn type, result types
+    db/
+      db.go                 ← connection, WAL, migrations, schema_migrations table
+      companies.go          ← upsert, update, get, filter queries
+      contacts.go           ← add, get, set_primary queries
+      runs.go               ← run_log, pipeline_runs, llm_usage, gemini_usage
+      scrape_cache.go       ← get, set, expire, archive
+    llm/
+      provider.go           ← Provider interface, CompletionRequest/Response types
+      client.go             ← Client: rate limiter, retry, backoff, unified usage logging
+      openrouter.go         ← OpenRouterProvider (exact tokens + cost)
+      gemini_cli.go         ← GeminiCLIProvider (exec, estimated tokens)
+      openai.go             ← OpenAIProvider (future, trivial once interface exists)
+    scraper/
+      fetcher.go            ← fetch_url: Jina → MCP → NEEDS_REVIEW, cache
+      mcp.go                ← Blueprint MCP client (navigate, get content, search)
+      jina.go               ← Jina client + quality check
+    collector/
+      sirene.go             ← Parquet stream + dept/NAF/headcount filter
+      recherche.go          ← recherche-entreprises.api.gouv.fr client
+      frenchtech.go         ← CSV import (one-time)
+    enricher/
+      enrich.go             ← run_enrichment(companyID): the main glue
+      discover.go           ← URL discovery (website, LinkedIn URL)
+      extract.go            ← RawCompanyPage struct + LLM extraction
+      contacts.go           ← LinkedIn contact discovery via MCP
+      classifier.go         ← llm_score_company, TECH_ADJACENT cap
+    generator/
+      drafts.go             ← career letter, cold email, LinkedIn hook
+      profile.go            ← load profile.json
+    guesser/
+      guesser.go            ← email pattern candidates + SMTP verification
+    api/
+      server.go             ← chi router setup, static file serving
+      jobs.go               ← /api/jobs handlers
+      prospects.go          ← /api/prospects handlers
+      runs.go               ← /api/runs, /api/usage, /api/health handlers
+      drafts.go             ← /api/drafts handlers (V2)
+    scheduler/
+      scheduler.go          ← ticker loop, run at configured times, archive job
+    errors/
+      errors.go             ← JobHunterError types, sentinel errors
   migrations/
-    001_contacts.sql
-    002_run_log.sql
-    003_llm_usage.sql
-    004_scrape_cache.sql
+    001_contacts.sql        ← reuse as-is from Python version
+    002_run_log.sql         ← reuse as-is
+    003_llm_usage.sql       ← reuse as-is
+    004_scrape_cache.sql    ← reuse as-is
+    005_pipeline_runs.sql   ← NEW: pipeline_runs summary table
+    006_gemini_usage.sql    ← NEW: gemini CLI estimated usage
+    007_drafts.sql          ← NEW: drafts table (was V2 in Python plan)
   static/
-    index.html             ← UPDATED: Runs tab, Usage tab, scraping health panel
+    index.html              ← reuse as-is, zero changes needed
   data/
-    cache/                 ← archived markdown files (YYYY-MM/domain/hash.md)
-  emails/
-  logs/
-  profile.json             ← V2: resume as structured data
+    sirene.parquet          ← already downloaded
+    cache/                  ← archived markdown
+  profile.json              ← your resume as structured data
   .env
-  PLAN.md                  ← this file
+  Taskfile.yml
+  go.mod
+  go.sum
 ```
 
 ---
 
-## Build Order
+## 6. Key Go Libraries
 
-| Step | What | Time estimate |
+| Need | Library | Notes |
 |---|---|---|
-| 1 | `errors.py` — exception hierarchy + `Result` type | 1–2h |
-| 2 | `llm.py` — OpenRouter client, rate limiter, usage tracking | ~4h |
-| 3 | Migration SQL files + `db.py` migration runner | ~3h |
-| 4 | `scraper/fetcher.py` — Jina + MCP fallback + cache | ~1 day |
-| 5 | `scraper/parsers/careers_page.py` — generic company page parser | ~3h |
-| 6 | `@pipeline_step` decorator + run_log wiring | ~3h |
-| 7 | Dashboard: Runs tab + Usage tab + scraping health panel | ~1 day |
-| **V1 done** | | |
-| 8 | `profile.json` schema + draft generation per-contact | ~1 day |
-| 9 | Dashboard outreach UI (edit, send, status timeline) | ~1 day |
-| 10 | Follow-up tracking | ~3h |
-| **V2 done** | | |
-| 11 | Job board scraper plugins (WTTJ, Indeed, LinkedIn, Lesjeudis) | ~2 days |
-| 12 | Company fuzzy matching + relevance scoring | ~3h |
-| 13 | Dashboard hot leads filter + job tab in company detail | ~3h |
-| **V3 done** | | |
+| SQLite | `modernc.org/sqlite` | Pure Go, no CGO, works everywhere. Prefer over `mattn/go-sqlite3` |
+| HTTP router | `github.com/go-chi/chi/v5` | Lightweight, idiomatic, no magic |
+| HTTP client | stdlib `net/http` | Sufficient for Jina + MCP + OpenRouter calls |
+| Rate limiter | `golang.org/x/time/rate` | Token bucket, exactly what you need |
+| Parquet | `github.com/xitongsys/parquet-go` | Pure Go streaming reads for SIRENE |
+| JSON | stdlib `encoding/json` | Sufficient; add `github.com/tidwall/gjson` for quick field extraction |
+| Config | `github.com/caarlos0/env/v11` | Struct tags on a single `Config` struct, validated at startup — cleaner than scattered `os.Getenv` calls |
+| TUI framework | `github.com/charmbracelet/bubbletea` | Elm-architecture TUI loop — pipeline views, live progress, scheduler screen |
+| TUI components | `github.com/charmbracelet/bubbles` | Spinner, progress bar, table, viewport, text input — use these before writing custom components |
+| TUI styling | `github.com/charmbracelet/lipgloss` | Colors, borders, layout — replaces inline ANSI codes everywhere |
+| TUI forms | `github.com/charmbracelet/huh` | Multi-step setup wizard (`jobhunter setup`) — purpose-built for this use case |
+| CLI subcommands | `github.com/spf13/cobra` | Needed now that each subcommand has its own Bubble Tea model; Cobra dispatches to the right one |
+| Logging | `go.uber.org/zap` | Structured fields + levels; `zap.String("run_id", id)` makes pipeline logs greppable. Use `zap.NewDevelopment()` locally, `zap.NewProduction()` (JSON) elsewhere |
+| DNS (guesser) | stdlib `net` | MX lookup is built in |
+| SMTP (guesser + send) | stdlib `net/smtp` | Built in |
+| Fuzzy match (V3) | `github.com/lithammer/fuzzysearch` | For company name matching against `companies` table |
 
 ---
 
-## Future Considerations
+## 7. The TUI — Charm Stack
 
-### Additional Data Sources
+### Library breakdown
 
-The current SIRENE seed is good but has a real weakness: it tells you nothing about whether a company is actually tech. The following sources could significantly reduce wasted enrichment calls on dormant shells and one-person consultancies, and improve starting data quality. Not planned for any specific version — revisit after V1 is stable.
+Charm's ecosystem is a coherent stack, not a single library. Each piece has a
+distinct role:
 
-**`recherche-entreprises.api.gouv.fr`** — Free, no auth, daily updates. Synthesizes SIRENE + RNE. Returns `dirigeants` (legal executives — often the founder/CTO at small companies). Useful as a live lookup to get a pre-enrichment contact signal before hitting LinkedIn, saving LLM calls on companies where the name is already available.
+| Library | Role | Used for |
+|---|---|---|
+| **Bubble Tea** | TUI event loop (Elm architecture) | Any view that updates in real time |
+| **Bubbles** | Pre-built components | Spinner, progress bar, table, viewport, text input |
+| **Lip Gloss** | Styling (colours, borders, layout) | All terminal styling — replaces ANSI codes |
+| **Huh** | Form / wizard library | `setup` command only |
+| **Cobra** | Subcommand routing | Dispatches `scan`, `enrich`, etc. to the right Bubble Tea model |
 
-**INPI RNE API (`data.inpi.fr`)** — Annual accounts in JSON. Gives exact revenue and headcount figures. Could be used as a pre-filter before enrichment: skip companies with revenue below or above a threshold. Reduces wasted LLM calls significantly.
+### Command → TUI mapping
 
-**French Tech 5000 CSV (Salesdorado)** — ~5,000 French digital companies enriched with SIREN, LinkedIn company URLs, headcount. The LinkedIn URLs are the key value — skip the search step in enrichment entirely. Free download, last updated 2021, so treat as a seed not a live source.
+Each subcommand gets the right treatment — not everything needs a full event loop:
 
-**French Tech Next40/120** — 120 high-signal scale-ups. Mostly too large for intern cold emails, but useful in V3 for job scraping context. Free CSV with LinkedIn URLs available via Datablist.
+**`jobhunter scan [city] [depts]`** → Bubble Tea app
+Full-screen view. Header: run ID + elapsed time. Body: scrollable list of
+companies being processed, each row cycling through `⠋ fetching` → `✓ saved` /
+`✗ skipped`. Footer: running totals (found / new / skipped). Quits automatically
+when the pipeline engine signals completion.
 
-If integrated, the ideal pipeline would be:
+**`jobhunter enrich [batch]`** → Bubble Tea app
+Same structure as scan. Each company row shows its current step:
+`⠋ fetching` → `⠋ extracting` → `⠋ finding contacts` → `✓ contact found` /
+`~ needs review`. Concurrency is visible — up to 3 rows animating simultaneously.
+
+**`jobhunter generate`** → Bubble Tea app
+Simpler: one row per company, spinner while LLM generates, then `✓ 3 drafts` or
+`✗ error`. Progress bar at the top showing X/total done.
+
+**`jobhunter stats`** → Lip Gloss only, no event loop
+Render a styled table to stdout and exit. No `tea.NewProgram` needed — just
+`lipgloss.NewStyle()` and `fmt.Println`. Done in ~30 lines.
+
+**`jobhunter setup`** → Huh form
+Multi-step wizard. Name → school → skills → start date → SMTP → API keys.
+Each field validates on submit. Writes `.env` on completion. This is exactly
+what Huh was designed for.
+
+**`jobhunter schedule`** → Bubble Tea app
+Persistent full-screen view. Shows: next scheduled run with live countdown,
+last run summary (companies processed, contacts found, cost), a log viewport
+scrolling recent activity. `q` to quit.
+
+**`jobhunter dashboard`** → no TUI
+Just print a Lip Gloss–styled banner (`http://localhost:8000`) and block on the
+HTTP server. The dashboard is the web UI — no terminal UI needed here.
+
+### The zap + Bubble Tea coexistence problem
+
+Zap writes to stdout/stderr. Bubble Tea owns the terminal. If both write
+simultaneously, the TUI corrupts. The fix:
+
+During a Bubble Tea session, configure zap to write to a file only:
+
+```go
+// Before tea.NewProgram(model):
+fileCore := zapcore.NewCore(
+    zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
+    zapcore.AddSync(logFile),
+    zap.DebugLevel,
+)
+logger = zap.New(fileCore)
 ```
-SIRENE          → bulk seed
-INPI RNE        → pre-filter micro/dormant
-Recherche Ent.  → add dirigeant name
-FrenchTech5k    → add LinkedIn URL if matched
-Jina/MCP        → full enrichment with better starting data
+
+Surface log lines inside the TUI by sending them as Bubble Tea messages through
+a channel. The pipeline engine pushes `LogMsg{Level, Text}` onto a channel; the
+Bubble Tea model receives them via `tea.Cmd` and appends them to a `viewport`
+component. The user sees live log output inside the TUI without stdout conflicts.
+
+```go
+// internal/tui/common.go
+type LogMsg struct {
+    Level string
+    Text  string
+}
+
+// Pipeline engine pushes to this channel
+// Bubble Tea model polls it via a tea.Cmd
+func waitForLog(ch <-chan LogMsg) tea.Cmd {
+    return func() tea.Msg {
+        return <-ch
+    }
+}
 ```
+
+This pattern — a channel bridge between background goroutines and the Bubble Tea
+loop — is the standard way to drive TUI updates from async work.
+
+### Lip Gloss colour palette
+
+Define once in `internal/tui/common.go`, use everywhere:
+
+```go
+var (
+    accent   = lipgloss.Color("#4af0a0")   // matches index.html --accent
+    accent2  = lipgloss.Color("#4ab8f0")
+    warn     = lipgloss.Color("#f0c44a")
+    danger   = lipgloss.Color("#f04a6e")
+    dim      = lipgloss.Color("#4a5268")
+    surface  = lipgloss.Color("#13161b")
+
+    tagTech     = lipgloss.NewStyle().Foreground(accent).Border(lipgloss.RoundedBorder())
+    tagAdjacent = lipgloss.NewStyle().Foreground(accent2).Border(lipgloss.RoundedBorder())
+    bold        = lipgloss.NewStyle().Bold(true)
+    dimStyle    = lipgloss.NewStyle().Foreground(dim)
+)
+```
+
+Keeping the palette consistent with `index.html`'s CSS variables means the
+terminal and web UIs feel like the same product.
+
+---
+
+## 8. The Pipeline Engine in Detail
+
+This replaces Dagster. Here is how it works:
+
+```go
+// engine.go
+
+type Run struct {
+    ID        string
+    StartedAt time.Time
+    Steps     []StepResult
+    db        *DB
+}
+
+type StepResult struct {
+    Name       string
+    Status     string // ok | error | skipped | needs_review
+    Error      error
+    DurationMs int64
+}
+
+func (e *Engine) Execute(ctx context.Context, steps []Step) (*Run, error) {
+    run := e.newRun()           // INSERT INTO pipeline_runs
+    for _, step := range steps {
+        result := e.runStep(ctx, run, step)
+        run.Steps = append(run.Steps, result)
+        if result.Status == "error" && step.StopOnError {
+            break
+        }
+    }
+    e.finalizeRun(run)          // UPDATE pipeline_runs SET status, finished_at
+    return run, nil
+}
+
+func (e *Engine) runStep(ctx context.Context, run *Run, step Step) StepResult {
+    start := time.Now()
+    e.logStep(run.ID, step.Name, "running", nil, 0)  // INSERT run_log
+
+    ctx, cancel := context.WithTimeout(ctx, step.Timeout)
+    defer cancel()
+
+    err := step.Fn(ctx, run)
+    duration := time.Since(start).Milliseconds()
+
+    status := "ok"
+    if err != nil { status = "error" }
+
+    e.logStep(run.ID, step.Name, status, err, duration)  // UPDATE run_log
+    return StepResult{Name: step.Name, Status: status, Error: err, DurationMs: duration}
+}
+```
+
+**For the enrichment stage**, where you run the same step for N companies in
+parallel:
+
+```go
+func enrichAllCompanies(ctx context.Context, run *Run) error {
+    companies, _ := run.db.GetCompaniesForEnrichment()
+
+    sem := make(chan struct{}, 3) // max 3 concurrent
+    var wg sync.WaitGroup
+    var mu sync.Mutex
+    var errs []error
+
+    for _, company := range companies {
+        wg.Add(1)
+        go func(c Company) {
+            defer wg.Done()
+            sem <- struct{}{}
+            defer func() { <-sem }()
+
+            err := enrichSingleCompany(ctx, run, c)
+            if err != nil {
+                mu.Lock()
+                errs = append(errs, err)
+                mu.Unlock()
+            }
+        }(company)
+    }
+
+    wg.Wait()
+    // partial failure is fine — individual errors are in run_log
+    return nil
+}
+```
+
+This gives you: parallel execution, per-company error isolation (one failure
+doesn't stop the others), full observability in `run_log`, and resumability
+(re-running the pipeline skips companies that already have `status != NEW`).
+
+---
+
+## 9. Build Order
+
+Do these in strict order. Each step produces something runnable or testable
+before moving on.
+
+| Step | Package | What | Testable when done |
+|---|---|---|---|
+| 1 | `internal/errors` | Error types | Import compiles |
+| 2 | `internal/db` | Connection, migrations, all query functions | `go run . stats` shows empty DB |
+| 3 | `internal/llm` | `Provider` interface + `Client` (rate limiter, retry, usage logging) + `OpenRouterProvider` | `go run . test-llm` calls API and logs to `llm_usage` |
+| 3b | `internal/llm/gemini_cli.go` | `GeminiCLIProvider` — same interface, estimated tokens | Fallback works transparently |
+| 4 | `internal/tui/common.go` | Lip Gloss palette + `LogMsg` channel bridge | Styles compile, colours match web UI |
+| 5 | `internal/tui/stats_view.go` | Lip Gloss stats table (no event loop) | `go run . stats` renders styled output |
+| 6 | `internal/collector/sirene.go` | DuckDB shell-out + NAF/headcount filter + import to `companies` | `go run . scan Poitiers 86` populates DB with real data |
+| 7 | `internal/enricher/classifier.go` | LLM scoring + TECH / TECH_ADJACENT / NON_TECH cap | Companies get types and scores against real SIRENE rows |
+| 8 | `internal/pipeline/engine.go` | Run + Step executor + run_log writes | `go run . run` creates a run in DB |
+| 9 | `internal/scraper/jina.go` | Jina fetch + quality check | Fetch any URL, see markdown |
+| 10 | `internal/scraper/mcp.go` | Blueprint MCP client | Navigate to LinkedIn, see HTML |
+| 11 | `internal/scraper/fetcher.go` | Jina → MCP → NEEDS_REVIEW + cache | Full fetch flow works |
+| 12 | `internal/enricher/extract.go` | RawCompanyPage + LLM extraction | Parse a fetched page for a real company from DB |
+| 13 | `internal/enricher/contacts.go` | LinkedIn contact discovery via MCP | Find a contact for a real company |
+| 14 | `internal/enricher/enrich.go` | **The glue** — full enrichment flow end-to-end | Enrichment runs against real SIRENE-sourced companies |
+| 15 | `internal/tui/pipeline_view.go` | Bubble Tea pipeline model (spinner list + log viewport) | `go run . enrich` shows live progress |
+| 16 | `internal/api` | chi router + all existing handlers | Dashboard loads, runs tab works |
+| **Core done** | | | |
+| 17 | `internal/generator/drafts.go` | Career letter + email + LinkedIn hook | Drafts appear in dashboard |
+| 18 | `internal/guesser` | Email pattern + SMTP verify | `go run . guess-emails` works |
+| 19 | `internal/scheduler` + `tui/scheduler_view.go` | Ticker loop + archive job + schedule screen | `go run . schedule` shows countdown UI |
+| 20 | `internal/tui/setup_view.go` | Huh multi-step form | `go run . setup` walks through config wizard |
+| **V1 complete** | | | |
+
+Steps 1–5 are infrastructure and TUI foundation. Steps 6–7 seed the DB with
+real data immediately — every subsequent step runs against actual companies, not
+fixtures. Steps 8–14 build the enrichment pipeline on top of that real data.
+Steps 15–20 complete the product.
+
+---
+
+## 10. What to Reuse From the Python Version
+
+| File | Action | What to take |
+|---|---|---|
+| `migrations/*.sql` | Copy as-is | All four files, unchanged |
+| `static/index.html` | Copy as-is | Served by Go's `http.FileServer` |
+| `Taskfile.yml` | Adapt | Replace `python jobhunter.py X` with `go run . X` |
+| `llm.py` | Read as reference | Retry logic, backoff math, `complete_json` pattern |
+| `scraper/fetcher.py` | Read as reference | Quality check logic, cache TTL config |
+| `scraper/parsers/careers_page.py` | Read as reference | System prompt, `RawCompanyPage` fields → Go struct |
+| `scraper/pipeline.py` | Read as reference | Step wrapper pattern → Go function wrapper |
+| `prospector.py` | Read as reference | `_headcount_label` map, SIRENE column names, enrichment prompt |
+| `errors.py` | Read as reference | Error type names → Go error types |
+| Everything else | Ignore | Rewrite fresh — it's simpler in Go |
+
+The `.env` key names stay identical. `profile.json` stays identical.
+The SQL migration files are language-agnostic and are a direct copy.
+
+---
+
+## 11. The One Decision to Make Before Starting
+
+**Parquet reading for SIRENE.**
+
+Option A: `xitongsys/parquet-go`
+- Pure Go, no external binary
+- API is verbose but works
+- Streaming batch reads handle the 2GB file fine
+- ~2–3h to get right the first time
+
+Option B: Shell out to DuckDB
+```go
+cmd := exec.Command("duckdb", "-csv", "-c",
+    `SELECT siren, denominationUsuelleEtablissement, ...
+     FROM 'data/sirene.parquet'
+     WHERE codePostalEtablissement LIKE '86%'
+     AND etatAdministratifEtablissement = 'A'`)
+out, _ := cmd.Output()
+// parse CSV
+```
+- DuckDB binary is a single 30MB static download
+- SQL is much more readable than the Parquet-go API
+- Zero library friction, done in 30 minutes
+- Adds a binary dependency
+
+**Recommendation:** Option B (DuckDB shell-out) to unblock yourself quickly.
+You can always replace it with Option A later. The SIRENE scan is not
+performance-critical — it runs once per city, not in the hot path.
