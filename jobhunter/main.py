@@ -33,8 +33,10 @@ HELP = """
   [cyan]jobhunter.py guess-emails[/cyan]         Try to guess missing contact emails
 
   [bold white]── Company prospecting ──[/bold white]
-  [cyan]jobhunter.py scan [city] [depts][/cyan]  Scan Pappers for local tech companies
-  [cyan]jobhunter.py enrich-prospects[/cyan]     Enrich prospects via Gemini + LinkedIn
+    [cyan]jobhunter.py scan [city] [depts][/cyan]  Scan SIRENE for local tech companies
+    [cyan]jobhunter.py target [batch][/cyan]      Score + Enrich best prospects in batch
+    [cyan]jobhunter.py download-sirene[/cyan]      Download ~2GB SIRENE data from data.gouv.fr
+    [cyan]jobhunter.py enrich-prospects[/cyan]     Enrich prospects via Gemini + LinkedIn
   [cyan]jobhunter.py score-prospects[/cyan]      LLM-score unscored companies
   [cyan]jobhunter.py frenchtech [city][/cyan]    Generate French Tech scrape prompt
 
@@ -140,6 +142,11 @@ async def main():
         depts = sys.argv[3].split(",") if len(sys.argv) > 3 else ["33","47","40"]
         await cmd_scan(city, depts, min_headcount=5)
 
+    elif cmd == "target":
+        from jobhunter.prospector import cmd_target
+        batch = int(sys.argv[2]) if len(sys.argv) > 2 else 10
+        await cmd_target(batch)
+
     elif cmd == "enrich-prospects":
         from jobhunter.prospector import cmd_enrich
         batch = int(sys.argv[2]) if len(sys.argv) > 2 else 20
@@ -153,6 +160,10 @@ async def main():
     elif cmd == "score-prospects":
         from jobhunter.prospector import cmd_score
         await cmd_score()
+
+    elif cmd == "download-sirene":
+        from jobhunter.prospector import download_sirene
+        await download_sirene()
 
     elif cmd == "prompts":
         from jobhunter.scraper import generate_prompts_only

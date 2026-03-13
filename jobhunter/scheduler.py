@@ -43,7 +43,7 @@ def notify(title: str, message: str):
 # ── DIFF DETECTION ────────────────────────────────────────────────────────────
 
 def get_current_counts() -> dict:
-    \"\"\"Snapshot current DB counts per status.\"\"\"
+    """Snapshot current DB counts per status."""
     from jobhunter.db import get_stats, init_db
     init_db()
     stats = get_stats()
@@ -123,7 +123,7 @@ async def run_pipeline_once(run_enrichment: bool = True):
     return summary
 
 async def run_archive_job():
-    \"\"\"Move old cache entries to disk.\"\"\"
+    """Move old cache entries to disk."""
     from jobhunter.db import get_conn
     import os
     

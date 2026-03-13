@@ -197,31 +197,24 @@ def parse_enrichment_output(output: str) -> list[dict]:
 def run_gemini_interactive(prompt: str, label: str) -> str:
     """
     Writes the prompt to a temp file and launches Gemini CLI.
-    In a real run, Gemini CLI is interactive — the user watches and can intervene.
-    We capture output via tee so we can parse it afterward.
     """
-    import tempfile, os
-
-    prompt_file = Path(__file__).parent / "data" / f"prompt_{label}.txt"
+    prompt_file = Path(__file__).parent.parent / "data" / f"prompt_{label}.txt"
     prompt_file.parent.mkdir(exist_ok=True)
     prompt_file.write_text(prompt)
 
-    log_file = Path(__file__).parent / "logs" / f"{label}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    log_file = Path(__file__).parent.parent / "logs" / f"{label}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     log_file.parent.mkdir(exist_ok=True)
 
     console.print(f"\n[bold cyan]▶ Launching Gemini CLI for: {label}[/bold cyan]")
-    console.print(f"  Prompt saved to: {prompt_file}")
-    console.print(f"  Log will be saved to: {log_file}")
-    console.print(f"\n[dim]Press Ctrl+C to stop this site and move to the next.[/dim]\n")
-
+    
     # Launch gemini CLI with the prompt piped in, tee output to log
     cmd = f'gemini < "{prompt_file}" 2>&1 | tee "{log_file}"'
 
     try:
-        result = subprocess.run(cmd, shell=True, text=True, capture_output=False)
+        subprocess.run(cmd, shell=True, text=True, capture_output=False)
         return log_file.read_text() if log_file.exists() else ""
     except KeyboardInterrupt:
-        console.print(f"\n[yellow]⏸ Interrupted. Parsing what we have so far...[/yellow]")
+        console.print(f"\n[yellow]⏸ Interrupted.[/yellow]")
         return log_file.read_text() if log_file.exists() else ""
 
 
@@ -261,28 +254,46 @@ async def run_stage1():
 
 
 async def run_stage2():
-    """Run Stage 2: enrich COMPANY_LEAD rows."""
-    from db import get_jobs, update_job, log_activity
+    """Run Stage 2: enrich COMPANY_LEAD rows (one agent per company)."""
+    from jobhunter.db import get_jobs, update_job, log_activity, upsert_company, add_contact
 
     companies = get_jobs(status="TO_ENRICH", type_="COMPANY_LEAD")
     if not companies:
         console.print("[yellow]No TO_ENRICH companies found. Run Stage 1 first.[/yellow]")
         return
 
-    console.rule(f"[bold]Stage 2 — Enriching {len(companies)} companies[/bold]")
-    prompt = build_stage2_prompt(companies)
+    console.rule(f"[bold]Stage 2 — Enriching {len(companies)} companies (one agent per company)[/bold]")
 
-    output = run_gemini_interactive(prompt, label="enrichment")
+    for i, job in enumerate(companies):
+        console.print(f"\n[bold cyan]▶ [{i+1}/{len(companies)}] Researching: {job['company']}[/bold cyan]")
+        prompt = build_stage2_prompt([job])
 
-    results = parse_enrichment_output(output)
-    console.print(f"\n  Parsed [bold]{len(results)}[/bold] enrichment results...")
+        output = run_gemini_interactive(prompt, label=f"enrich_{job['id']}")
+        results = parse_enrichment_output(output)
 
-    for result in results:
-        job_id = result.pop("id", None)
-        if not job_id:
+        if not results:
+            console.print(f"  [yellow]⚠ No results for {job['company']}[/yellow]")
             continue
 
+        result = results[0]
+        job_id = result.pop("id", None)
+        if not job_id: continue
+
+        company_id, _ = upsert_company({"name": job["company"]})
         has_contact = any(result.get(f) for f in ["contact_name", "contact_email", "contact_linkedin"])
+        
+        if has_contact:
+            contact_id = add_contact(company_id, {
+                "name": result.get("contact_name"),
+                "role": result.get("contact_role"),
+                "email": result.get("contact_email"),
+                "linkedin_url": result.get("contact_linkedin"),
+                "source": "linkedin",
+                "confidence": "probable",
+                "is_primary": True
+            })
+            result["primary_contact_id"] = contact_id
+            
         result["status"] = "TO_CONTACT" if has_contact else "NO_CONTACT_FOUND"
 
         update_job(job_id, result)
@@ -291,8 +302,10 @@ async def run_stage2():
         icon = "✓" if has_contact else "✗"
         color = "green" if has_contact else "red"
         console.print(f"  [{color}]{icon} ID {job_id}: {result.get('contact_name', 'No contact found')}[/{color}]")
+        
+        await asyncio.sleep(1)
 
-    notify("Stage 2 done", f"{len(results)} companies enriched")
+    notify("Stage 2 done", f"{len(companies)} companies processed")
     print_stats()
 
 
@@ -332,10 +345,7 @@ def generate_prompts_only():
         console.print(f"  ✓ {path}")
 
     console.print(f"\n[green]✓ {len(SITES)} Stage 1 prompts saved to {PROMPTS_DIR}[/green]")
-    console.print("[dim]Paste them manually into Gemini CLI if you prefer manual control.[/dim]")
 
-
-# ── ENTRY POINT ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "help"
@@ -350,12 +360,4 @@ if __name__ == "__main__":
         init_db()
         print_stats()
     else:
-        console.print("""
-[bold]scraper.py[/bold] — JobHunter Stage 1 & 2
-
-Usage:
-  python scraper.py run       Run Stage 1 (scrape all sites interactively)
-  python scraper.py enrich    Run Stage 2 (enrich COMPANY_LEAD rows)
-  python scraper.py prompts   Generate prompt files only (no Gemini CLI)
-  python scraper.py stats     Show database stats
-        """)
+        print("Usage: scraper.py [run|enrich|prompts|stats]")

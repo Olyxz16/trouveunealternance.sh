@@ -1,0 +1,93 @@
+version: '3'
+
+vars:
+  PYTHON: python3
+  CITY: Poitiers
+  DEPTS: 86
+
+tasks:
+  setup:
+    desc: First-time setup and profile configuration
+    cmds:
+      - "{{.PYTHON}} jobhunter.py setup"
+
+  install:
+    desc: Install python dependencies
+    cmds:
+      - pip install -r requirements.txt
+
+  # ── JOB SCRAPING ────────────────────────────────────────────────────────────
+
+  scrape:
+    desc: Stage 1 — Scrape job sites interactively
+    cmds:
+      - "{{.PYTHON}} jobhunter.py scrape"
+
+  enrich:
+    desc: Stage 2 — Enrich company leads from job listings
+    cmds:
+      - "{{.PYTHON}} jobhunter.py enrich"
+
+  emails:
+    desc: Stage 3 — Approve and send cold emails
+    cmds:
+      - "{{.PYTHON}} jobhunter.py emails"
+
+  guess-emails:
+    desc: Attempt to guess missing contact emails for jobs
+    cmds:
+      - "{{.PYTHON}} jobhunter.py guess-emails"
+
+  # ── PROSPECTING ─────────────────────────────────────────────────────────────
+
+  scan:
+    desc: Scan SIRENE for local tech companies (use CITY=... DEPTS=...)
+    cmds:
+      - "{{.PYTHON}} jobhunter.py scan {{.CITY}} {{.DEPTS}}"
+
+  target:
+    desc: Score + Enrich best prospects in batch (use BATCH=10)
+    cmds:
+      - "{{.PYTHON}} jobhunter.py target {{.BATCH | default 10}}"
+
+  download-sirene:
+    desc: Download ~2GB SIRENE data from data.gouv.fr (run once)
+    cmds:
+      - "{{.PYTHON}} jobhunter.py download-sirene"
+
+  enrich-prospects:
+    desc: Enrich prospects via Gemini + LinkedIn
+    cmds:
+      - "{{.PYTHON}} jobhunter.py enrich-prospects"
+
+  score-prospects:
+    desc: LLM-score unscored companies
+    cmds:
+      - "{{.PYTHON}} jobhunter.py score-prospects"
+
+  # ── INFRASTRUCTURE ──────────────────────────────────────────────────────────
+
+  dashboard:
+    desc: Start local dashboard (localhost:8000)
+    cmds:
+      - "{{.PYTHON}} jobhunter.py dashboard"
+
+  schedule:
+    desc: Start the scheduler (daily runs at 8:30 + 18:00)
+    cmds:
+      - "{{.PYTHON}} jobhunter.py schedule"
+
+  once:
+    desc: Run full pipeline (scrape + enrich) once now
+    cmds:
+      - "{{.PYTHON}} jobhunter.py once"
+
+  stats:
+    desc: Show database statistics
+    cmds:
+      - "{{.PYTHON}} jobhunter.py stats"
+
+  prompts:
+    desc: Generate prompt files without running Gemini CLI
+    cmds:
+      - "{{.PYTHON}} jobhunter.py prompts"
