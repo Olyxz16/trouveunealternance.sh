@@ -1,0 +1,48 @@
+version: '3'
+
+vars:
+  CITY: Poitiers
+  DEPTS: 86
+  BATCH: 10
+
+tasks:
+  # ── PROSPECTING ─────────────────────────────────────────────────────────────
+
+  scan:
+    desc: Scan SIRENE for local tech companies (use DEPTS=86,87)
+    cmds:
+      - go run . scan --dept {{.DEPTS}}
+
+  score:
+    desc: LLM-score unscored companies in DB
+    cmds:
+      - go run . score
+
+  enrich:
+    desc: Enrich scored prospects via website + LinkedIn (use BATCH=10)
+    cmds:
+      - go run . enrich --batch {{.BATCH}}
+
+  # ── INFRASTRUCTURE ──────────────────────────────────────────────────────────
+
+  stats:
+    desc: Show database statistics
+    cmds:
+      - go run . stats
+
+  dashboard:
+    desc: Start local dashboard (localhost:8080)
+    cmds:
+      - go run . dashboard
+
+  bridge:
+    desc: Start the MCP Browser Bridge on port 3000
+    cmds:
+      - go run . bridge
+
+  # ── FULL PIPELINE ───────────────────────────────────────────────────────────
+
+  run:
+    desc: Run a full scan + score pipeline
+    cmds:
+      - go run . scan --dept {{.DEPTS}}

@@ -92,7 +92,7 @@ func (s *SireneCollector) Scan(ctx context.Context, departments []string, minHea
 		SELECT 
 			siren, 
 			siret, 
-			COALESCE(denominationUsuelleEtablissement, enseigne1Etablissement, 'Company ' || siren) as name,
+			COALESCE(denominationUsuelleEtablissement, enseigne1Etablissement, enseigne2Etablissement, enseigne3Etablissement, 'Company ' || siren) as name,
 			activitePrincipaleEtablissement as naf_code,
 			trancheEffectifsEtablissement as headcount_code,
 			codePostalEtablissement as zip,

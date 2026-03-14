@@ -73,44 +73,173 @@ Go engine writing to the same tables.
 
 ---
 
-## 2. Browser Automation Decision
+## 2. Fetching & Content Extraction
 
-### Keep Blueprint MCP
+### No Jina — local-first pipeline
 
-Blueprint MCP is an HTTP server that proxies to your real Firefox session. Your
-Go code calls it the same way the Python code did: plain HTTP POST to
-`http://localhost:3000`. The session persistence (LinkedIn cookies, WTTJ login)
-is its core value — a headless Chrome library won't have this.
+Jina's actual value is the fetch layer, not the markdown conversion. The
+conversion step — which is all you'd be paying for — is trivially replaceable
+with local libraries. More importantly, Jina can't handle LinkedIn or any
+page requiring a real session. The architecture below has no external API
+dependency in the hot path.
+
+### The Fetcher interface
+
+Every fetch backend implements a single interface that returns raw HTML:
 
 ```go
-// From Go, calling Blueprint MCP is just:
-resp, err := http.Post("http://localhost:3000/browser/navigate",
-    "application/json",
-    strings.NewReader(`{"url": "https://linkedin.com/company/acme"}`))
+// internal/scraper/fetcher.go
+
+type Fetcher interface {
+    Fetch(ctx context.Context, url string) (string, error) // returns raw HTML
+    Name() string
+}
 ```
 
-### When to use what
+Two implementations:
 
-Jina (`r.jina.ai/{url}`) and Cloudflare Browser Rendering both convert pages to
-markdown, but they are not equivalent for this use case. Jina is a managed proxy
-with zero config — prepend it to any URL and get markdown back. Cloudflare
-requires an account, API token, and per-browser-second billing. Critically,
-**neither bypasses bot detection** — both are identified as bots by sites that
-care. For anything that requires a logged-in session (LinkedIn), both fail
-identically. Blueprint MCP is irreplaceable for those cases.
+```go
+// internal/scraper/http.go
+// Plain net/http GET. Fast (~200ms), no external dependency.
+// Works for most company websites and career pages.
+type HTTPFetcher struct {
+    client *http.Client
+}
 
-Use Jina for the cheap first pass. Use MCP when sessions matter. Never reach for
-Cloudflare Browser Rendering — it adds account complexity for no gain here.
+// internal/scraper/mcp.go
+// Calls Blueprint MCP — your real Firefox session.
+// Handles JS rendering, CAPTCHAs, bot detection, and auth-required pages.
+// Works for LinkedIn, WTTJ with session, anything the browser can open.
+type MCPFetcher struct {
+    host string // http://localhost:3000
+}
+```
 
-| Source | Method | Reason |
-|---|---|---|
-| Company website / careers page | Jina (`r.jina.ai/{url}`) | Zero config, fast, sufficient for static/lightly dynamic pages |
-| LinkedIn company page | Blueprint MCP | Requires real session, anti-bot |
-| LinkedIn People tab | Blueprint MCP | Requires real session |
-| WTTJ job listings (V3) | Jina first, MCP fallback | Usually works without auth |
-| Indeed France (V3) | Jina first, MCP fallback | Usually works without auth |
+### The CascadeFetcher
 
-### LLM provider interface
+A `CascadeFetcher` sits above both implementations and owns all the
+orchestration: cache, domain overrides, fallback logic, extraction, quality
+check. Callers never touch `HTTPFetcher` or `MCPFetcher` directly.
+
+```go
+// internal/scraper/cascade.go
+
+type CascadeFetcher struct {
+    primary   Fetcher    // HTTPFetcher
+    fallback  Fetcher    // MCPFetcher
+    forceMCP  []string   // domains that always skip primary (from FORCE_MCP_DOMAINS in .env)
+    cache     *db.DB
+    extractor *Extractor
+    logger    *zap.Logger
+}
+
+func (c *CascadeFetcher) Fetch(ctx context.Context, url string) (FetchResult, error) {
+    // 1. Cache check → return immediately if fresh
+    // 2. Domain in forceMCP list? → skip primary, go straight to fallback
+    // 3. Try primary (HTTPFetcher) → extract → quality check → cache → return
+    // 4. Primary failed or poor quality → try fallback (MCPFetcher) → extract → quality check → cache → return
+    // 5. Both failed → return NeedsReviewError, caller sets company status = NEEDS_REVIEW
+}
+
+type FetchResult struct {
+    ContentMD string
+    Method    string  // "http" | "mcp" | "cache" — for logging + health panel
+    Quality   float64 // 0.0–1.0
+}
+```
+
+`FORCE_MCP_DOMAINS` in `.env` is a comma-separated list of domains that always
+skip the HTTP fetcher. Start with `linkedin.com` — add others as you discover
+them without touching code:
+
+```env
+FORCE_MCP_DOMAINS=linkedin.com
+MCP_HOST=http://localhost:3000
+```
+
+### The extraction pipeline
+
+Once any fetcher returns raw HTML, the same local extraction pipeline runs
+regardless of which fetcher was used:
+
+```go
+// internal/scraper/extractor.go
+
+type Extractor struct{}
+
+func (e *Extractor) Extract(html, url string) (string, error) {
+    // 1. Site-specific preprocessor (strips known noise before extraction)
+    html = preprocess(html, url)
+
+    // 2. Trafilatura (primary — better recall on arbitrary pages)
+    if content := trafilatura.Extract(html); isGoodQuality(content) {
+        return content, nil
+    }
+
+    // 3. Readability (fallback — more conservative, better on article-like pages)
+    if content := readability.Extract(html); isGoodQuality(content) {
+        return content, nil
+    }
+
+    // 4. Raw body extraction (last resort — noisier but something is better than nothing)
+    return rawExtract(html), nil
+}
+```
+
+```go
+// internal/scraper/preprocessors.go
+
+func preprocess(html, url string) string {
+    switch {
+    case strings.Contains(url, "linkedin.com"):
+        return preprocessLinkedIn(html) // strips left nav, right sidebar, messaging overlay
+    default:
+        return html
+    }
+}
+```
+
+```go
+// internal/scraper/markdown.go
+// Wraps github.com/JohannesKaufmann/html-to-markdown/v2
+// Called by the Extractor after content isolation, before quality check.
+func ToMarkdown(html string) (string, error)
+```
+
+### Why this works for LinkedIn
+
+Previously LinkedIn was a special case that Jina couldn't handle. Now:
+
+1. `linkedin.com` is in `FORCE_MCP_DOMAINS` → always uses `MCPFetcher`
+2. MCP navigates with your real Firefox session → full rendered HTML returned
+3. `preprocessLinkedIn()` strips the chrome (nav, sidebar, overlays)
+4. Trafilatura extracts the main content cleanly
+5. html-to-markdown converts it
+
+The People tab for contact discovery follows the same path — MCP navigates,
+returns HTML, local pipeline extracts the contact list. No special casing
+anywhere above `CascadeFetcher`.
+
+### Full internal structure
+
+```
+internal/scraper/
+  fetcher.go        — Fetcher interface + FetchResult type
+  http.go           — HTTPFetcher (net/http GET)
+  mcp.go            — MCPFetcher (Blueprint MCP client)
+  cascade.go        — CascadeFetcher: cache, forceMCP, fallback, orchestration
+  extractor.go      — Trafilatura → Readability → raw cascade + quality check
+  preprocessors.go  — site-specific HTML cleanup (LinkedIn, others as needed)
+  markdown.go       — html-to-markdown wrapper (JohannesKaufmann/html-to-markdown/v2)
+```
+
+The People tab for contact discovery follows the same path — MCP navigates to
+the company's People tab, returns HTML, local pipeline extracts the contact
+list as markdown. No special casing anywhere above `CascadeFetcher`.
+
+---
+
+## 3. LLM Provider Interface
 
 Rather than hardcoding OpenRouter calls and bolting Gemini CLI on as a special
 case, model every LLM backend as an implementation of a single `Provider`
@@ -212,7 +341,7 @@ GEMINI_CLI_PATH=gemini           # binary name if on PATH, or full path
 
 ---
 
-## 3. The Four Pipeline Stages
+## 4. The Four Pipeline Stages
 
 ### Stage 1 — Data Collection
 
@@ -271,7 +400,7 @@ in Python. For each company with `status = NEW` and no `primary_contact_id`:
 ```
 For each company:
   3a. Discover URLs
-  3b. Fetch content (Jina → MCP → NEEDS_REVIEW)
+  3b. Fetch + extract content (CascadeFetcher)
   3c. Extract structured data (LLM)
   3d. Find contacts (LLM + MCP LinkedIn search)
   3e. Save results
@@ -281,19 +410,18 @@ For each company:
 
 If the company has no `website` or `linkedin_url`, try to find them:
 - Query `recherche-entreprises.api.gouv.fr/{siren}` — sometimes returns website
-- Search Jina: `https://r.jina.ai/search?q={company_name}+{city}+site:linkedin.com`
-- Fallback: construct LinkedIn search URL and fetch via MCP
+- Construct LinkedIn company search URL and fetch via `CascadeFetcher` (will use MCP since it's a LinkedIn domain)
+- Fallback: DuckDuckGo search via `CascadeFetcher`: `https://duckduckgo.com/?q={name}+{city}+site:linkedin.com`
 
-**3b. Fetch content**
+**3b. Fetch + extract content**
 
-Ordered by cost (cheapest first):
-1. Check `scrape_cache` (SQLite) — if fresh, return immediately
-2. Try Jina for company website / careers page
-3. Try MCP (Blueprint) for LinkedIn company page — always needed for contacts
-4. If both fail → `status = NEEDS_REVIEW`, log to `run_log`, continue to next company
+Call `cascadeFetcher.Fetch(ctx, url)` for each URL. The cascade handles
+everything internally — HTTP fast path, MCP fallback, `FORCE_MCP_DOMAINS`,
+local extraction pipeline, cache. The enricher receives a `FetchResult` with
+clean markdown and never touches a fetcher directly.
 
-Cache TTL: 24h for career pages, 7 days for LinkedIn company pages (they change
-slowly), 1h for job board listings (V3).
+Cache TTL: 24h for career pages, 7 days for LinkedIn pages, 1h for job board
+listings (V3).
 
 **3c. Extract structured data**
 
@@ -386,7 +514,7 @@ is transparent. Usage is logged to the correct table either way.
 
 ---
 
-## 4. Metrics & Cost Tracking
+## 5. Metrics & Cost Tracking
 
 ### Unified through the LLM client
 
@@ -455,7 +583,7 @@ a run shows the per-step `run_log` grid (already implemented in `index.html`).
 
 ---
 
-## 5. Go Project Structure
+## 6. Go Project Structure
 
 ```
 jobhunter/
@@ -485,9 +613,13 @@ jobhunter/
       gemini_cli.go         ← GeminiCLIProvider (exec, estimated tokens)
       openai.go             ← OpenAIProvider (future, trivial once interface exists)
     scraper/
-      fetcher.go            ← fetch_url: Jina → MCP → NEEDS_REVIEW, cache
-      mcp.go                ← Blueprint MCP client (navigate, get content, search)
-      jina.go               ← Jina client + quality check
+      fetcher.go            ← Fetcher interface + FetchResult type
+      http.go               ← HTTPFetcher (net/http GET)
+      mcp.go                ← MCPFetcher (Blueprint MCP client)
+      cascade.go            ← CascadeFetcher: cache, forceMCP, fallback, orchestration
+      extractor.go          ← Trafilatura → Readability → raw cascade + quality check
+      preprocessors.go      ← site-specific HTML cleanup (LinkedIn, others as needed)
+      markdown.go           ← html-to-markdown wrapper (JohannesKaufmann/html-to-markdown/v2)
     collector/
       sirene.go             ← Parquet stream + dept/NAF/headcount filter
       recherche.go          ← recherche-entreprises.api.gouv.fr client
@@ -535,14 +667,17 @@ jobhunter/
 
 ---
 
-## 6. Key Go Libraries
+## 7. Key Go Libraries
 
 | Need | Library | Notes |
 |---|---|---|
 | SQLite | `modernc.org/sqlite` | Pure Go, no CGO, works everywhere. Prefer over `mattn/go-sqlite3` |
 | HTTP router | `github.com/go-chi/chi/v5` | Lightweight, idiomatic, no magic |
-| HTTP client | stdlib `net/http` | Sufficient for Jina + MCP + OpenRouter calls |
+| HTTP client | stdlib `net/http` | HTTPFetcher + all other outbound calls |
 | Rate limiter | `golang.org/x/time/rate` | Token bucket, exactly what you need |
+| HTML extraction | `github.com/markusmobius/go-trafilatura` | Primary content extractor — better recall on arbitrary pages |
+| HTML extraction | `github.com/go-shiori/go-readability` | Fallback extractor — more conservative, reliable on article/blog pages |
+| HTML → Markdown | `github.com/JohannesKaufmann/html-to-markdown/v2` | Converts clean extracted HTML to markdown; handles tables well (important for LinkedIn) |
 | Parquet | `github.com/xitongsys/parquet-go` | Pure Go streaming reads for SIRENE |
 | JSON | stdlib `encoding/json` | Sufficient; add `github.com/tidwall/gjson` for quick field extraction |
 | Config | `github.com/caarlos0/env/v11` | Struct tags on a single `Config` struct, validated at startup — cleaner than scattered `os.Getenv` calls |
@@ -784,9 +919,9 @@ before moving on.
 | 6 | `internal/collector/sirene.go` | DuckDB shell-out + NAF/headcount filter + import to `companies` | `go run . scan Poitiers 86` populates DB with real data |
 | 7 | `internal/enricher/classifier.go` | LLM scoring + TECH / TECH_ADJACENT / NON_TECH cap | Companies get types and scores against real SIRENE rows |
 | 8 | `internal/pipeline/engine.go` | Run + Step executor + run_log writes | `go run . run` creates a run in DB |
-| 9 | `internal/scraper/jina.go` | Jina fetch + quality check | Fetch any URL, see markdown |
-| 10 | `internal/scraper/mcp.go` | Blueprint MCP client | Navigate to LinkedIn, see HTML |
-| 11 | `internal/scraper/fetcher.go` | Jina → MCP → NEEDS_REVIEW + cache | Full fetch flow works |
+| 9 | `internal/scraper/http.go` + `mcp.go` | `HTTPFetcher` and `MCPFetcher` implementations | Fetch a raw URL with each, see HTML |
+| 10 | `internal/scraper/extractor.go` + `preprocessors.go` + `markdown.go` | Trafilatura → Readability → raw cascade + html-to-markdown | Feed raw HTML, get clean markdown out |
+| 11 | `internal/scraper/cascade.go` | `CascadeFetcher`: cache, `FORCE_MCP_DOMAINS`, fallback, full flow | `cascadeFetcher.Fetch(url)` returns markdown for any URL |
 | 12 | `internal/enricher/extract.go` | RawCompanyPage + LLM extraction | Parse a fetched page for a real company from DB |
 | 13 | `internal/enricher/contacts.go` | LinkedIn contact discovery via MCP | Find a contact for a real company |
 | 14 | `internal/enricher/enrich.go` | **The glue** — full enrichment flow end-to-end | Enrichment runs against real SIRENE-sourced companies |
@@ -814,7 +949,7 @@ Steps 15–20 complete the product.
 | `static/index.html` | Copy as-is | Served by Go's `http.FileServer` |
 | `Taskfile.yml` | Adapt | Replace `python jobhunter.py X` with `go run . X` |
 | `llm.py` | Read as reference | Retry logic, backoff math, `complete_json` pattern |
-| `scraper/fetcher.py` | Read as reference | Quality check logic, cache TTL config |
+| `scraper/fetcher.py` | Read as reference | Cache TTL config, quality check thresholds, NEEDS_REVIEW logic |
 | `scraper/parsers/careers_page.py` | Read as reference | System prompt, `RawCompanyPage` fields → Go struct |
 | `scraper/pipeline.py` | Read as reference | Step wrapper pattern → Go function wrapper |
 | `prospector.py` | Read as reference | `_headcount_label` map, SIRENE column names, enrichment prompt |

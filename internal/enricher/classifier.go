@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"jobhunter/internal/db"
 	"jobhunter/internal/llm"
+	"log"
 	"strings"
 )
 
@@ -19,12 +20,28 @@ type CompanyScore struct {
 const ScoreSystemPrompt = `You are evaluating French companies as potential internship hosts for a DevOps/backend student.
 
 Classification:
-- TECH: Product is software/infra.
-- TECH_ADJACENT: Non-tech business (retail, bank, logistics) but large enough (100+ emp) to have internal IT/infra.
-- NON_TECH: No meaningful tech needs.
+- TECH: Core product is software, infra, or IT services. IMPORTANT: NAF codes starting with 62 or 63 are ALMOST ALWAYS TECH.
+- TECH_ADJACENT: Non-tech business (retail, bank, logistics, industry) but large enough (100+ employees) to have a significant internal IT/infra team.
+- NON_TECH: No meaningful internal tech team or tech needs.
 
-For TECH_ADJACENT, look for signals: digital transformation, tech blog, job postings for devs despite non-tech core business.
-Score 0-10 based on stack relevance and company profile.
+Scoring (0-10):
+- 10: Perfect fit (DevOps/Cloud product, major tech company).
+- 8-9: Very good (Tech services, large tech team in a product company).
+- 5-7: Good (Tech_adjacent but with clear tech signals, or smaller IT services).
+- 1-4: Poor (Low relevance but some tech).
+- 0: Completely irrelevant (NO internal tech).
+
+A company classified as TECH or TECH_ADJACENT should NEVER have a 0 score.
+If you see NAF 62xx or 63xx, it is TECH by definition.
+
+IMPORTANT: Even if the Description is empty, you MUST provide an assessment based on the Company Name and NAF code. Do not ask for more information. Use your internal knowledge about the company if the name is recognizable.
+
+You MUST return a JSON object with EXACTLY these fields:
+- relevance_score: int (0-10)
+- company_type: string (TECH, TECH_ADJACENT, or NON_TECH)
+- has_internal_tech_team: boolean
+- tech_team_signals: list of strings
+- reasoning: string
 `
 
 type Classifier struct {
@@ -40,17 +57,23 @@ func NewClassifier(llmClient *llm.Client, database *db.DB) *Classifier {
 }
 
 func (c *Classifier) ScoreCompany(ctx context.Context, comp db.Company, runID string) (CompanyScore, error) {
+	currentInfo := ""
+	if comp.CompanyType != "" && comp.CompanyType != "UNKNOWN" {
+		currentInfo = fmt.Sprintf("\nHeuristic Classification: %s", comp.CompanyType)
+	}
+
 	prompt := fmt.Sprintf(`Company: %s
 NAF: %s - %s
 City: %s
 Size: %s employees
-Description: %s`,
+Description: %s%s`,
 		comp.Name,
 		comp.NAFCode.String,
 		comp.NAFLabel.String,
 		comp.City.String,
 		comp.HeadcountRange.String,
 		comp.Description.String,
+		currentInfo,
 	)
 
 	var score CompanyScore
@@ -62,6 +85,18 @@ Description: %s`,
 	err := c.llm.CompleteJSON(ctx, req, "score_company", runID, &score)
 	if err != nil {
 		return CompanyScore{}, err
+	}
+
+	// Normalize CompanyType to match DB constraint
+	score.CompanyType = strings.ToUpper(strings.ReplaceAll(score.CompanyType, "-", "_"))
+	
+	// Validate against allowed values to avoid DB error
+	switch score.CompanyType {
+	case "TECH", "TECH_ADJACENT", "NON_TECH":
+		// OK
+	default:
+		log.Printf("Warning: LLM returned invalid company_type '%s', defaulting to UNKNOWN", score.CompanyType)
+		score.CompanyType = "UNKNOWN"
 	}
 
 	// Apply caps and defaults from PLAN.md

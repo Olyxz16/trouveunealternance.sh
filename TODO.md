@@ -2,19 +2,19 @@
 
 - [x] 1. `internal/errors`: Error types
 - [x] 2. `internal/db`: Connection, migrations, all query functions
-- [x] 3. `internal/llm`: `Provider` interface + `Client` + `OpenRouterProvider`
-- [x] 3b. `internal/llm/gemini_cli.go`: `GeminiCLIProvider`
+- [x] 3. `internal/llm`: `Provider` interface + `Client` + `OpenRouterProvider` (Fixed: retry + backoff)
+- [x] 3b. `internal/llm/gemini_cli.go`: `GeminiCLIProvider` (Fixed: -p and raw-output flags)
 - [x] 4. `internal/tui/common.go`: Lip Gloss palette + `LogMsg` channel bridge
 - [x] 5. `internal/tui/stats_view.go`: Lip Gloss stats table
 - [x] 6. `internal/collector/sirene.go`: DuckDB shell-out + NAF/headcount filter + import to `companies`
-- [x] 7. `internal/enricher/classifier.go`: LLM scoring + TECH / TECH_ADJACENT / NON_TECH cap
+- [x] 7. `internal/enricher/classifier.go`: LLM scoring (Fixed: NAF awareness + 0-score issues + empty description handling)
 - [x] 8. `internal/pipeline/engine.go`: Run + Step executor + run_log writes
-- [ ] 9. `internal/scraper/jina.go`: Jina fetch + quality check
-- [ ] 10. `internal/scraper/mcp.go`: Blueprint MCP client
-- [ ] 11. `internal/scraper/fetcher.go`: Jina → MCP → NEEDS_REVIEW + cache
-- [ ] 12. `internal/enricher/extract.go`: RawCompanyPage + LLM extraction
-- [ ] 13. `internal/enricher/contacts.go`: LinkedIn contact discovery via MCP
-- [ ] 14. `internal/enricher/enrich.go`: The glue — full enrichment flow end-to-end
+- [x] 9. `internal/scraper/http.go` + `mcp.go`: `HTTPFetcher` and `MCPFetcher` implementations
+- [x] 10. `internal/scraper/extractor.go` + `preprocessors.go` + `markdown.go`: Trafilatura → Readability → raw cascade + html-to-markdown
+- [x] 11. `internal/scraper/cascade.go`: `CascadeFetcher`: cache, `FORCE_MCP_DOMAINS`, fallback, orchestration
+- [x] 12. `internal/enricher/extract.go`: RawCompanyPage + LLM extraction
+- [x] 13. `internal/enricher/contacts.go`: LinkedIn contact discovery via MCP
+- [x] 14. `internal/enricher/enrich.go`: The glue — full enrichment flow end-to-end
 - [ ] 15. `internal/tui/pipeline_view.go`: Bubble Tea pipeline model
 - [ ] 16. `internal/api`: chi router + all existing handlers
 - [ ] 17. `internal/generator/drafts.go`: Career letter + email + LinkedIn hook

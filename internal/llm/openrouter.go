@@ -22,16 +22,11 @@ type openRouterRequest struct {
 	Model          string              `json:"model"`
 	Messages       []openRouterMessage `json:"messages"`
 	MaxTokens      int                 `json:"max_tokens,omitempty"`
-	ResponseFormat *responseFormat     `json:"response_format,omitempty"`
 }
 
 type openRouterMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
-}
-
-type responseFormat struct {
-	Type string `json:"type"`
 }
 
 type openRouterResponse struct {
@@ -73,9 +68,6 @@ func (p *OpenRouterProvider) Complete(ctx context.Context, req CompletionRequest
 	}
 	if req.MaxTokens > 0 {
 		payload.MaxTokens = req.MaxTokens
-	}
-	if req.JSONMode {
-		payload.ResponseFormat = &responseFormat{Type: "json_object"}
 	}
 
 	jsonData, err := json.Marshal(payload)

@@ -30,57 +30,108 @@ func NewClient(provider Provider, fallback Provider, rpm int, database *db.DB) *
 }
 
 func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runID string) (CompletionResponse, error) {
-	if err := c.limiter.Wait(ctx); err != nil {
-		return CompletionResponse{}, err
+	var lastErr error
+	maxRetries := 3
+	backoff := 1 * time.Second
+
+	// 1. Try Primary with retries
+	for i := 0; i <= maxRetries; i++ {
+		if err := c.limiter.Wait(ctx); err != nil {
+			return CompletionResponse{}, err
+		}
+
+		resp, err := c.provider.Complete(ctx, req)
+		if err == nil {
+			c.logUsage(resp, task, runID)
+			return resp, nil
+		}
+		lastErr = err
+
+		// Check if it's an error that warrants a retry
+		shouldRetry := false
+		if _, ok := err.(*errors.RateLimitError); ok {
+			shouldRetry = true
+		} else if modelErr, ok := err.(*errors.ModelError); ok {
+			// Retry on 5xx errors or 429
+			if modelErr.StatusCode >= 500 || modelErr.StatusCode == 429 {
+				shouldRetry = true
+			}
+		}
+
+		if shouldRetry && i < maxRetries {
+			log.Printf("Primary LLM %s failed (attempt %d/%d), retrying in %v: %v", c.provider.Name(), i+1, maxRetries+1, backoff, err)
+			time.Sleep(backoff)
+			backoff *= 2
+			continue
+		}
+		break
 	}
 
-	var resp CompletionResponse
-	var err error
-
-	// Try primary provider
-	resp, err = c.provider.Complete(ctx, req)
-	if err != nil && c.fallback != nil {
-		log.Printf("Primary LLM provider failed, trying fallback: %v", err)
-		resp, err = c.fallback.Complete(ctx, req)
+	// 2. Try Fallback if primary failed
+	if c.fallback != nil {
+		log.Printf("Primary LLM provider failed, trying fallback %s: %v", c.fallback.Name(), lastErr)
+		resp, err := c.fallback.Complete(ctx, req)
+		if err == nil {
+			c.logUsage(resp, task, runID)
+			return resp, nil
+		}
+		lastErr = err
 	}
 
-	if err != nil {
-		return CompletionResponse{}, err
+	return CompletionResponse{}, lastErr
+}
+
+func extractJSON(content string) string {
+	cleanJSON := strings.TrimSpace(content)
+	
+	// If it contains markdown fences, extract the content
+	if strings.Contains(cleanJSON, "```json") {
+		parts := strings.Split(cleanJSON, "```json")
+		if len(parts) > 1 {
+			cleanJSON = strings.Split(parts[1], "```")[0]
+		}
+	} else if strings.Contains(cleanJSON, "```") {
+		parts := strings.Split(cleanJSON, "```")
+		if len(parts) > 1 {
+			cleanJSON = strings.Split(parts[1], "```")[0]
+		}
 	}
 
-	c.logUsage(resp, task, runID)
-	return resp, nil
+	// If there is still text around the JSON, find the first '{' and last '}'
+	start := strings.Index(cleanJSON, "{")
+	end := strings.LastIndex(cleanJSON, "}")
+	if start != -1 && end != -1 && end > start {
+		cleanJSON = cleanJSON[start : end+1]
+	}
+
+	return strings.TrimSpace(cleanJSON)
 }
 
 func (c *Client) CompleteJSON(ctx context.Context, req CompletionRequest, task, runID string, target interface{}) error {
 	req.JSONMode = true
-	// We append schema info if needed or rely on the provider
-	// For simplicity, we just try to unmarshal the result
+
+	// Inject JSON instructions into system prompt
+	if !strings.Contains(strings.ToUpper(req.System), "JSON") {
+		req.System = fmt.Sprintf("%s\n\nReturn ONLY a valid JSON object. Do not include any explanation.", req.System)
+	}
 
 	resp, err := c.Complete(ctx, req, task, runID)
 	if err != nil {
 		return err
 	}
 
-	cleanJSON := strings.TrimSpace(resp.Content)
-	cleanJSON = strings.TrimPrefix(cleanJSON, "```json")
-	cleanJSON = strings.TrimPrefix(cleanJSON, "```")
-	cleanJSON = strings.TrimSuffix(cleanJSON, "```")
-	cleanJSON = strings.TrimSpace(cleanJSON)
+	cleanJSON := extractJSON(resp.Content)
 
 	if err := json.Unmarshal([]byte(cleanJSON), target); err != nil {
-		// Retry once if unmarshal fails
-		log.Printf("JSON unmarshal failed, retrying once: %v", err)
-		req.User = fmt.Sprintf("%s\n\nThe previous response was not valid JSON: %v. Please fix it.", req.User, err)
+		log.Printf("JSON unmarshal failed, retrying once with error feedback: %v", err)
+		req.User = fmt.Sprintf("%s\n\nYour previous response was not valid JSON: %s\nError: %v\nPlease return ONLY the valid JSON object.", req.User, resp.Content, err)
+		
 		resp, err = c.Complete(ctx, req, task, runID)
 		if err != nil {
 			return err
 		}
-		cleanJSON = strings.TrimSpace(resp.Content)
-		cleanJSON = strings.TrimPrefix(cleanJSON, "```json")
-		cleanJSON = strings.TrimPrefix(cleanJSON, "```")
-		cleanJSON = strings.TrimSuffix(cleanJSON, "```")
-		cleanJSON = strings.TrimSpace(cleanJSON)
+		
+		cleanJSON = extractJSON(resp.Content)
 		if err := json.Unmarshal([]byte(cleanJSON), target); err != nil {
 			return errors.NewParseError(resp.Content, fmt.Sprintf("%T", target))
 		}

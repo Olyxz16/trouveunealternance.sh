@@ -3,7 +3,9 @@ package llm
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os/exec"
+	"strings"
 )
 
 type GeminiCLIProvider struct {
@@ -22,22 +24,22 @@ func (p *GeminiCLIProvider) Name() string {
 }
 
 func (p *GeminiCLIProvider) Complete(ctx context.Context, req CompletionRequest) (CompletionResponse, error) {
-	// Gemini CLI typically takes the prompt as stdin or argument.
-	// Based on PLAN.md: "Pipes prompt to stdin of the `gemini` binary, captures stdout."
-	
 	fullPrompt := req.System + "\n\n" + req.User
 	
-	cmd := exec.CommandContext(ctx, p.BinaryPath, "ask", "--quiet")
-	cmd.Stdin = bytes.NewBufferString(fullPrompt)
+	// -p: headless prompt mode
+	// --raw-output: avoid TUI/interactive overhead
+	cmd := exec.CommandContext(ctx, p.BinaryPath, "-p", fullPrompt, "--raw-output")
 	
 	var out bytes.Buffer
+	var stderr bytes.Buffer
 	cmd.Stdout = &out
+	cmd.Stderr = &stderr
 	
 	if err := cmd.Run(); err != nil {
-		return CompletionResponse{}, err
+		return CompletionResponse{}, fmt.Errorf("gemini cli failed: %w (stderr: %s)", err, stderr.String())
 	}
 	
-	content := out.String()
+	content := strings.TrimSpace(out.String())
 	
 	// Estimated tokens: chars / 4
 	promptTokens := len(fullPrompt) / 4

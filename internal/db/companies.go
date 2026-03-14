@@ -113,13 +113,14 @@ func (db *DB) UpdateCompany(id int, fields map[string]interface{}) error {
 
 func (db *DB) GetCompany(id int) (*Company, error) {
 	var c Company
+	var contactName, contactRole, contactEmail, contactLinkedin sql.NullString
 	err := db.QueryRow("SELECT * FROM companies WHERE id=?", id).Scan(
 		&c.ID, &c.Name, &c.Siren, &c.Siret, &c.NAFCode, &c.NAFLabel,
 		&c.City, &c.Department, &c.Address,
 		&c.HeadcountRange, &c.HeadcountExact, &c.CreationYear, &c.LegalForm,
 		&c.Website, &c.LinkedinURL, &c.TwitterURL, &c.GithubURL,
 		&c.TechStack, &c.Description,
-		&sql.NullString{}, &sql.NullString{}, &sql.NullString{}, &sql.NullString{}, // contact_name, role, email, linkedin (legacy)
+		&contactName, &contactRole, &contactEmail, &contactLinkedin,
 		&c.CareersPageURL, &c.Source, &c.Status, &c.RelevanceScore, &c.EmailDraft, &c.Notes,
 		&c.DateFound, &c.UpdatedAt, &c.PrimaryContactID, &c.CompanyType, &c.HasInternalTechTeam, &c.TechTeamSignals,
 	)
@@ -139,13 +140,14 @@ func (db *DB) GetCompaniesForEnrichment() ([]Company, error) {
 	var companies []Company
 	for rows.Next() {
 		var c Company
+		var contactName, contactRole, contactEmail, contactLinkedin sql.NullString
 		err := rows.Scan(
 			&c.ID, &c.Name, &c.Siren, &c.Siret, &c.NAFCode, &c.NAFLabel,
 			&c.City, &c.Department, &c.Address,
 			&c.HeadcountRange, &c.HeadcountExact, &c.CreationYear, &c.LegalForm,
 			&c.Website, &c.LinkedinURL, &c.TwitterURL, &c.GithubURL,
 			&c.TechStack, &c.Description,
-			&sql.NullString{}, &sql.NullString{}, &sql.NullString{}, &sql.NullString{},
+			&contactName, &contactRole, &contactEmail, &contactLinkedin,
 			&c.CareersPageURL, &c.Source, &c.Status, &c.RelevanceScore, &c.EmailDraft, &c.Notes,
 			&c.DateFound, &c.UpdatedAt, &c.PrimaryContactID, &c.CompanyType, &c.HasInternalTechTeam, &c.TechTeamSignals,
 		)
