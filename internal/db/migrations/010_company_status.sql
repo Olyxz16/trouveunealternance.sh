@@ -38,10 +38,30 @@ CREATE TABLE companies_new (
     tech_team_signals TEXT,
     legal_name       TEXT,
     acronym          TEXT,
-    name_normalized  TEXT
+    name_normalized  TEXT,
+    company_email    TEXT
 );
 
-INSERT INTO companies_new SELECT * FROM companies;
+INSERT INTO companies_new (
+    id, name, siren, siret, naf_code, naf_label, city, department, address,
+    headcount_range, headcount_exact, creation_year, legal_form, website,
+    linkedin_url, twitter_url, github_url, tech_stack, description,
+    contact_name, contact_role, contact_email, contact_linkedin,
+    careers_page_url, source, status, relevance_score, email_draft,
+    notes, date_found, updated_at, primary_contact_id, company_type,
+    has_internal_tech_team, tech_team_signals, legal_name, acronym,
+    name_normalized
+)
+SELECT 
+    id, name, siren, siret, naf_code, naf_label, city, department, address,
+    headcount_range, headcount_exact, creation_year, legal_form, website,
+    linkedin_url, twitter_url, github_url, tech_stack, description,
+    contact_name, contact_role, contact_email, contact_linkedin,
+    careers_page_url, source, status, relevance_score, email_draft,
+    notes, date_found, updated_at, primary_contact_id, company_type,
+    has_internal_tech_team, tech_team_signals, legal_name, acronym,
+    name_normalized
+FROM companies;
 DROP TABLE companies;
 ALTER TABLE companies_new RENAME TO companies;
 

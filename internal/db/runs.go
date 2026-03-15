@@ -171,19 +171,17 @@ func (db *DB) GetUsageHistory(days int) ([]DayUsage, error) {
 }
 
 type HealthStats struct {
-	JinaHealthy      int `json:"jina_healthy"`
-	JinaTotal        int `json:"jina_total"`
-	MCP24h           int `json:"mcp_24h"`
+	HTTPHealthy      int `json:"http_healthy"`   // was JinaHealthy
+	HTTPTotal        int `json:"http_total"`      // was JinaTotal
+	Browser24h       int `json:"browser_24h"`     // was MCP24h
 	NeedsReviewCount int `json:"needs_review_count"`
 }
 
 func (db *DB) GetScrapingHealth() (HealthStats, error) {
 	var s HealthStats
-	_ = db.QueryRow("SELECT COUNT(*) FROM scrape_cache WHERE method='jina' AND quality >= 0.7").Scan(&s.JinaHealthy)
-	_ = db.QueryRow("SELECT COUNT(*) FROM scrape_cache WHERE method='jina'").Scan(&s.JinaTotal)
-	_ = db.QueryRow("SELECT COUNT(*) FROM run_log WHERE step='enrich' AND status='needs_review' AND ts >= datetime('now', '-24 hours')").Scan(&s.NeedsReviewCount)
-	// For MCP, we now use 'browser'
-	_ = db.QueryRow("SELECT COUNT(*) FROM run_log WHERE step LIKE '%fetch%' AND status='ok' AND ts >= datetime('now', '-24 hours')").Scan(&s.MCP24h)
-	
+	_ = db.QueryRow("SELECT COUNT(*) FROM scrape_cache WHERE method='http' AND quality >= 0.7").Scan(&s.HTTPHealthy)
+	_ = db.QueryRow("SELECT COUNT(*) FROM scrape_cache WHERE method='http'").Scan(&s.HTTPTotal)
+	_ = db.QueryRow("SELECT COUNT(*) FROM scrape_cache WHERE method='browser' AND fetched_at >= datetime('now', '-24 hours')").Scan(&s.Browser24h)
+	_ = db.QueryRow("SELECT COUNT(*) FROM run_log WHERE status='needs_review' AND ts >= datetime('now', '-24 hours')").Scan(&s.NeedsReviewCount)
 	return s, nil
 }

@@ -177,6 +177,26 @@ func (db *DB) initMigrations() error {
 			return err
 		}
 
+		// Special handling for 011_company_email.sql to be idempotent
+		if name == "011_company_email.sql" {
+			_, err := tx.Exec(string(content))
+			if err != nil {
+				if !strings.Contains(err.Error(), "duplicate column name") {
+					tx.Rollback()
+					return fmt.Errorf("failed to apply migration %s: %w", name, err)
+				}
+			}
+			// Already executed content above, record it and commit
+			if _, err := tx.Exec("INSERT INTO schema_migrations (name) VALUES (?)", name); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("failed to record migration %s: %w", name, err)
+			}
+			if err := tx.Commit(); err != nil {
+				return err
+			}
+			continue
+		}
+
 		if _, err := tx.Exec(string(content)); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("failed to apply migration %s: %w", name, err)

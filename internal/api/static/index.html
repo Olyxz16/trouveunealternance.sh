@@ -493,11 +493,10 @@ async function loadUsage() {
 async function loadHealth() {
   const h = await api('/health');
   document.getElementById('healthPanel').innerHTML = `
-    <div>Jina: ${h.jina_healthy}/${h.jina_total} healthy</div>
-    <div>MCP: ${h.mcp_24h} calls (24h)</div>
-    <div>Review: ${h.needs_review_count} items</div>
-  `;
-}
+      <div>HTTP: ${h.http_healthy}/${h.http_total} healthy</div>
+      <div>Browser: ${h.browser_24h} fetches (24h)</div>
+      <div>Review: ${h.needs_review_count} items</div>
+  `;}
 
 let currentTab = 'jobs';
 function switchTab(t) {

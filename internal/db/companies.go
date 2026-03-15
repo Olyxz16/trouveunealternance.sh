@@ -241,3 +241,35 @@ func (db *DB) GetCompaniesForEnrichment() ([]Company, error) {
 	}
 	return companies, nil
 }
+
+type Job struct {
+	ID             int    `json:"id"`
+	Company        string `json:"company"`
+	Title          string `json:"title"`
+	Status         string `json:"status"`
+	DateFound      string `json:"date_found"`
+	RelevanceScore int    `json:"relevance_score"`
+	Type           string `json:"type"`
+}
+
+func (db *DB) GetJobs(limit int) ([]Job, error) {
+	rows, err := db.Query(`
+        SELECT id, company, title, status, date_found, relevance_score, type
+        FROM jobs ORDER BY relevance_score DESC, date_found DESC LIMIT ?
+    `, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var jobs []Job
+	for rows.Next() {
+		var j Job
+		if err := rows.Scan(&j.ID, &j.Company, &j.Title, &j.Status,
+			&j.DateFound, &j.RelevanceScore, &j.Type); err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, j)
+	}
+	return jobs, nil
+}

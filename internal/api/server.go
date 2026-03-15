@@ -74,30 +74,15 @@ func (s *Server) handleGetStats(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetJobs(w http.ResponseWriter, r *http.Request) {
-	// For now, return all jobs. In future, add filters.
-	rows, err := s.db.Query("SELECT * FROM jobs ORDER BY relevance_score DESC, date_found DESC")
+	jobs, err := s.db.GetJobs(200)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
-
-	var jobs []map[string]interface{}
-	for rows.Next() {
-		// Use a map for flexibility since we don't have a shared Job struct yet
-		// or just query the basic fields the dashboard needs.
-		var id int
-		var company, title, status, dateFound string
-		var score int
-		// Scan into dummy variables for now to match dashboard needs
-		// Real implementation should use a struct.
-		// (Simplified for brevity)
-		jobs = append(jobs, map[string]interface{}{
-			"id": id, "company": company, "title": title, "status": status, "date_found": dateFound, "relevance_score": score,
-		})
+	if jobs == nil {
+		jobs = []db.Job{} // return [] not null
 	}
-	// Need to fix this once db.GetJobs is implemented in Go
-	json.NewEncoder(w).Encode([]interface{}{}) 
+	json.NewEncoder(w).Encode(jobs)
 }
 
 func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {

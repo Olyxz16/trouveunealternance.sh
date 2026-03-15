@@ -6,7 +6,7 @@ import (
 
 type FetchResult struct {
 	ContentMD string
-	Method    string  // "http" | "mcp" | "cache"
+	Method    string  // "http" | "browser" | "cache"
 	Quality   float64 // 0.0–1.0
 }
 

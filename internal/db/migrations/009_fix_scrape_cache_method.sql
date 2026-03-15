@@ -1,7 +1,7 @@
 CREATE TABLE scrape_cache_new (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   url         TEXT NOT NULL UNIQUE,
-  method      TEXT NOT NULL CHECK(method IN ('http','mcp','manual','cache','jina')),
+  method      TEXT NOT NULL CHECK(method IN ('http','browser','manual','cache')),
   content_md  TEXT NOT NULL,
   quality     REAL NOT NULL DEFAULT 1.0,
   fetched_at  TEXT NOT NULL DEFAULT (datetime('now')),

@@ -23,26 +23,6 @@ type ScrapingError struct {
 	BaseError
 }
 
-type JinaError struct {
-	ScrapingError
-	URL             string
-	StatusCode      int
-	ResponsePreview string
-}
-
-func NewJinaError(url string, statusCode int, responsePreview string) *JinaError {
-	preview := responsePreview
-	if len(preview) > 100 {
-		preview = preview[:100]
-	}
-	return &JinaError{
-		ScrapingError: ScrapingError{BaseError{Message: fmt.Sprintf("Jina failed for %s (status %d): %s", url, statusCode, preview)}},
-		URL:             url,
-		StatusCode:      statusCode,
-		ResponsePreview: responsePreview,
-	}
-}
-
 type MCPError struct {
 	ScrapingError
 	URL    string

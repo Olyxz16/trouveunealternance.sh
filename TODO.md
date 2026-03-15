@@ -1,23 +1,15 @@
-# JobHunter Go Refactoring TODO
+# JobHunter Refactoring Progress
 
-- [x] 1. `internal/errors`: Error types
-- [x] 2. `internal/db`: Connection, migrations, all query functions
-- [x] 3. `internal/llm`: `Provider` interface + `Client` + `OpenRouterProvider` (Fixed: retry + backoff)
-- [x] 3b. `internal/llm/gemini_cli.go`: `GeminiCLIProvider` (Fixed: -p and raw-output flags)
-- [x] 4. `internal/tui/common.go`: Lip Gloss palette + `LogMsg` channel bridge
-- [x] 5. `internal/tui/stats_view.go`: Lip Gloss stats table
-- [x] 6. `internal/collector/sirene.go`: DuckDB shell-out + NAF/headcount filter + import to `companies`
-- [x] 7. `internal/enricher/classifier.go`: LLM scoring (Fixed: NAF awareness + 0-score issues + empty description handling)
-- [x] 8. `internal/pipeline/engine.go`: Run + Step executor + run_log writes
-- [x] 9. `internal/scraper/http.go` + `mcp.go`: `HTTPFetcher` and `MCPFetcher` implementations
-- [x] 10. `internal/scraper/extractor.go` + `preprocessors.go` + `markdown.go`: Trafilatura → Readability → raw cascade + html-to-markdown
-- [x] 11. `internal/scraper/cascade.go`: `CascadeFetcher`: cache, `FORCE_MCP_DOMAINS`, fallback, orchestration
-- [x] 12. `internal/enricher/extract.go`: RawCompanyPage + LLM extraction
-- [x] 13. `internal/enricher/contacts.go`: LinkedIn contact discovery via MCP
-- [x] 14. `internal/enricher/enrich.go`: The glue — full enrichment flow end-to-end
-- [ ] 15. `internal/tui/pipeline_view.go`: Bubble Tea pipeline model
-- [ ] 16. `internal/api`: chi router + all existing handlers
-- [ ] 17. `internal/generator/drafts.go`: Career letter + email + LinkedIn hook
-- [ ] 18. `internal/guesser`: Email pattern + SMTP verify
-- [ ] 19. `internal/scheduler` + `tui/scheduler_view.go`: Ticker loop + archive job + schedule screen
-- [ ] 20. `internal/tui/setup_view.go`: Huh multi-step form
+- [x] Fix 2: Update `scrape_cache` CHECK constraint in `internal/db/migrations/009_fix_scrape_cache_method.sql`
+- [x] Fix 1: Add `company_email` to `companies_new` in `internal/db/migrations/010_company_status.sql`
+- [x] Fix 9: Resolve `max()` builtin conflict in `internal/tui/pipeline_view.go`
+- [x] Fix 3: Implement `shouldCache` in `internal/scraper/cascade.go`
+- [x] Fix 4: Normalize LinkedIn URLs in `internal/enricher/contacts.go`
+- [x] Fix 5: Handle NULL `primary_contact_id` in `cmd/generate.go`
+- [x] Fix 6: Verify `allCompanyCols` scan order in `internal/db/companies.go` (Verified)
+- [x] Fix 7: Implement `GetJobs` and fix `handleGetJobs`
+- [x] Fix 8: Update health panel queries and dashboard
+- [x] Fix 10: Update `PLAN.md`
+- [x] Fix 11: Remove dead `JinaError` in `internal/errors/errors.go`
+- [x] Fix 12: Update stale comment in `internal/scraper/fetcher.go`
+- [x] Final Validation: Wipe DB and re-run migrations

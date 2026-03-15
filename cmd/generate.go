@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"jobhunter/internal/generator"
 	"jobhunter/internal/llm"
@@ -60,13 +61,16 @@ var generateCmd = &cobra.Command{
 		for rows.Next() {
 			var id int
 			var name string
-			var contactID int
+			var contactID sql.NullInt64
 			if err := rows.Scan(&id, &name, &contactID); err != nil {
 				continue
 			}
+			if !contactID.Valid {
+				continue // skip companies with no primary contact
+			}
 
 			fmt.Printf("▶ Generating drafts for %s...\n", name)
-			drafts, err := gen.GenerateDrafts(ctx, id, contactID, prof, runID)
+			drafts, err := gen.GenerateDrafts(ctx, id, int(contactID.Int64), prof, runID)
 			if err != nil {
 				fmt.Printf("  ❌ Error: %v\n", err)
 				continue
@@ -79,12 +83,12 @@ var generateCmd = &cobra.Command{
 			_, err = database.Exec(`
 				INSERT INTO drafts (company_id, contact_id, type, subject, body, model)
 				VALUES (?, ?, 'email', ?, ?, ?)
-			`, id, contactID, drafts.Email.Subject, drafts.Email.Body, primary.Name())
+			`, id, int(contactID.Int64), drafts.Email.Subject, drafts.Email.Body, primary.Name())
 			
 			_, err = database.Exec(`
 				INSERT INTO drafts (company_id, contact_id, type, body, model)
 				VALUES (?, ?, 'linkedin', ?, ?)
-			`, id, contactID, drafts.Linkedin.Body, primary.Name())
+			`, id, int(contactID.Int64), drafts.Linkedin.Body, primary.Name())
 
 			if err == nil {
 				fmt.Printf("  ✅ Drafts saved\n")

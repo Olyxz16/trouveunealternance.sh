@@ -98,22 +98,42 @@ func (c *CascadeFetcher) tryFetcher(ctx context.Context, f Fetcher, url string) 
 	}
 
 	// Save to cache
-	now := time.Now()
-	expiresAt := now.Add(24 * time.Hour) // Default 24h
-	if strings.Contains(url, "linkedin.com") {
-		expiresAt = now.Add(7 * 24 * time.Hour)
+	if shouldCache(url) {
+		now := time.Now()
+		expiresAt := now.Add(24 * time.Hour) // Default 24h
+		if strings.Contains(url, "linkedin.com") {
+			expiresAt = now.Add(7 * 24 * time.Hour)
+		}
+
+		_ = c.cache.SetCache(&db.ScrapeCache{
+			URL:       url,
+			Method:    f.Name(),
+			ContentMD: markdown,
+			Quality:   quality,
+			FetchedAt: now.Format("2006-01-02 15:04:05"),
+			ExpiresAt: expiresAt.Format("2006-01-02 15:04:05"),
+		})
 	}
 
-	_ = c.cache.SetCache(&db.ScrapeCache{
-		URL:       url,
-		Method:    f.Name(),
-		ContentMD: markdown,
-		Quality:   quality,
-		FetchedAt: now.Format("2006-01-02 15:04:05"),
-		ExpiresAt: expiresAt.Format("2006-01-02 15:04:05"),
-	})
-
 	return res, nil
+}
+
+// shouldCache returns false for search engine result pages that must never
+// be cached — their content changes on every request and stale results
+// break URL discovery.
+func shouldCache(url string) bool {
+	noCacheDomains := []string{
+		"duckduckgo.com",
+		"google.com",
+		"bing.com",
+		"search.yahoo.com",
+	}
+	for _, d := range noCacheDomains {
+		if strings.Contains(url, d) {
+			return false
+		}
+	}
+	return true
 }
 
 func calculateQuality(content string) float64 {

@@ -204,9 +204,3 @@ func truncate(s string, max int) string {
 	return s[:max-3] + "..."
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}

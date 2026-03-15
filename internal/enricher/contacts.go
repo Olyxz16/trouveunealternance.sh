@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"jobhunter/internal/llm"
 	"jobhunter/internal/scraper"
+	"strings"
 )
 
 // PeoplePageData — extracted from LinkedIn People tab.
@@ -37,7 +38,7 @@ const PeopleExtractionPrompt = `You are extracting a list of individual employee
 Return ALL relevant contacts found (up to 5 people). Do not return just one.
 
 STRICT RULES:
-- linkedin_url MUST be a personal LinkedIn profile URL starting with /in/ — NEVER a /company/ URL
+- linkedin_url MUST be a personal LinkedIn profile URL starting with https://www.linkedin.com/in/ — never a relative path like /in/... — NEVER a /company/ URL
 - email: only include if a personal work email is explicitly visible on the page — do NOT include generic company emails (contact@, info@, careers@, jobs@) — leave empty if unsure
 - name and role are required — skip entries where you cannot determine both
 - Focus on: CTO, VP Engineering, Engineering Manager, Tech Lead, DevOps Engineer, Infrastructure Manager, IT Director, Technical Recruiter
@@ -97,11 +98,12 @@ func (c *Classifier) RankContacts(ctx context.Context, contacts []IndividualCont
 
 // EnrichIndividualProfile fetches and extracts data from a personal /in/ profile.
 func (c *Classifier) EnrichIndividualProfile(ctx context.Context, fetcher *scraper.CascadeFetcher, contact IndividualContact, runID string) (IndividualProfileData, error) {
-	if contact.LinkedinURL == "" {
+	profileURL := normalizeLinkedInURL(contact.LinkedinURL)
+	if profileURL == "" {
 		return IndividualProfileData{Name: contact.Name, Role: contact.Role}, nil
 	}
 
-	res, err := fetcher.Fetch(ctx, contact.LinkedinURL)
+	res, err := fetcher.Fetch(ctx, profileURL)
 	if err != nil {
 		// Non-fatal: return what we already know
 		return IndividualProfileData{Name: contact.Name, Role: contact.Role}, nil
@@ -117,4 +119,20 @@ func (c *Classifier) EnrichIndividualProfile(ctx context.Context, fetcher *scrap
 		return IndividualProfileData{Name: contact.Name, Role: contact.Role}, nil
 	}
 	return profile, nil
+}
+
+// normalizeLinkedInURL ensures a LinkedIn profile URL is absolute.
+// The LLM occasionally returns relative paths (/in/...) or scheme-less URLs.
+func normalizeLinkedInURL(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if strings.HasPrefix(raw, "https://") || strings.HasPrefix(raw, "http://") {
+		return raw
+	}
+	if strings.HasPrefix(raw, "/") {
+		return "https://www.linkedin.com" + raw
+	}
+	return "https://www.linkedin.com/in/" + raw
 }
