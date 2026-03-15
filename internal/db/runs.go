@@ -72,3 +72,118 @@ func (db *DB) InsertGeminiUsage(runID, step string, promptTokens, completionToke
 	`, runID, step, promptTokens, completionTokens)
 	return err
 }
+
+func (db *DB) GetRuns(limit int) ([]PipelineRun, error) {
+	rows, err := db.Query(`
+		SELECT run_id, started_at, finished_at, status, companies_processed, contacts_found, drafts_generated, llm_cost_usd, error_count 
+		FROM pipeline_runs ORDER BY started_at DESC LIMIT ?
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var runs []PipelineRun
+	for rows.Next() {
+		var r PipelineRun
+		err := rows.Scan(&r.RunID, &r.StartedAt, &r.FinishedAt, &r.Status, &r.CompaniesProcessed, &r.ContactsFound, &r.DraftsGenerated, &r.LLMCostUSD, &r.ErrorCount)
+		if err != nil {
+			return nil, err
+		}
+		runs = append(runs, r)
+	}
+	return runs, nil
+}
+
+func (db *DB) GetRunDetails(runID string) ([]RunLog, error) {
+	rows, err := db.Query(`
+		SELECT id, run_id, company_id, job_id, step, status, error_type, error_msg, duration_ms, ts 
+		FROM run_log WHERE run_id = ? ORDER BY ts ASC
+	`, runID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []RunLog
+	for rows.Next() {
+		var l RunLog
+		err := rows.Scan(&l.ID, &l.RunID, &l.CompanyID, &l.JobID, &l.Step, &l.Status, &l.ErrorType, &l.ErrorMsg, &l.DurationMS, &l.TS)
+		if err != nil {
+			return nil, err
+		}
+		logs = append(logs, l)
+	}
+	return logs, nil
+}
+
+type UsageStats struct {
+	Requests         int     `json:"requests"`
+	PromptTokens     int     `json:"prompt_tokens"`
+	CompletionTokens int     `json:"completion_tokens"`
+	TotalCost        float64 `json:"total_cost"`
+}
+
+func (db *DB) GetUsageToday() (UsageStats, error) {
+	var s UsageStats
+	// Combine llm_usage and gemini_usage (estimated)
+	err := db.QueryRow(`
+		SELECT COUNT(*), SUM(prompt_tokens), SUM(completion_tokens), SUM(cost_usd) 
+		FROM llm_usage WHERE ts >= date('now')
+	`).Scan(&s.Requests, &s.PromptTokens, &s.CompletionTokens, &s.TotalCost)
+	
+	// Add gemini estimates
+	var gReq, gPrompt, gComp int
+	_ = db.QueryRow(`
+		SELECT COUNT(*), SUM(prompt_tokens), SUM(completion_tokens) 
+		FROM gemini_usage WHERE ts >= date('now')
+	`).Scan(&gReq, &gPrompt, &gComp)
+	
+	s.Requests += gReq
+	s.PromptTokens += gPrompt
+	s.CompletionTokens += gComp
+	
+	return s, err
+}
+
+type DayUsage struct {
+	Day  string  `json:"day"`
+	Cost float64 `json:"cost"`
+}
+
+func (db *DB) GetUsageHistory(days int) ([]DayUsage, error) {
+	rows, err := db.Query(`
+		SELECT date(ts) as day, SUM(cost_usd) as total_cost 
+		FROM llm_usage GROUP BY day ORDER BY day DESC LIMIT ?
+	`, days)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var history []DayUsage
+	for rows.Next() {
+		var d DayUsage
+		rows.Scan(&d.Day, &d.Cost)
+		history = append(history, d)
+	}
+	return history, nil
+}
+
+type HealthStats struct {
+	JinaHealthy      int `json:"jina_healthy"`
+	JinaTotal        int `json:"jina_total"`
+	MCP24h           int `json:"mcp_24h"`
+	NeedsReviewCount int `json:"needs_review_count"`
+}
+
+func (db *DB) GetScrapingHealth() (HealthStats, error) {
+	var s HealthStats
+	_ = db.QueryRow("SELECT COUNT(*) FROM scrape_cache WHERE method='jina' AND quality >= 0.7").Scan(&s.JinaHealthy)
+	_ = db.QueryRow("SELECT COUNT(*) FROM scrape_cache WHERE method='jina'").Scan(&s.JinaTotal)
+	_ = db.QueryRow("SELECT COUNT(*) FROM run_log WHERE step='enrich' AND status='needs_review' AND ts >= datetime('now', '-24 hours')").Scan(&s.NeedsReviewCount)
+	// For MCP, we now use 'browser'
+	_ = db.QueryRow("SELECT COUNT(*) FROM run_log WHERE step LIKE '%fetch%' AND status='ok' AND ts >= datetime('now', '-24 hours')").Scan(&s.MCP24h)
+	
+	return s, nil
+}

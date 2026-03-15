@@ -3,13 +3,16 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"jobhunter/internal/db"
 	"jobhunter/internal/enricher"
 	"jobhunter/internal/llm"
 	"jobhunter/internal/scraper"
+	"jobhunter/internal/tui"
 	"log"
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 	"go.uber.org/zap"
@@ -27,12 +30,12 @@ var enrichCmd = &cobra.Command{
 	Short: "Enrich companies with website and contact info",
 	Run: func(cmd *cobra.Command, args []string) {
 		runID := uuid.New().String()
-		ctx := context.Background()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
-		// Setup Logger
-		logger, _ := zap.NewDevelopment()
-		defer logger.Sync()
-
+		// Channel for TUI logs
+		logCh := make(chan tui.LogMsg, 100)
+		
 		// Setup LLM
 		var primary, fallback llm.Provider
 		if cfg.LLMPrimary == "openrouter" {
@@ -53,6 +56,9 @@ var enrichCmd = &cobra.Command{
 		// Setup Scraper
 		httpFetcher := scraper.NewHTTPFetcher()
 		
+		logger, _ := zap.NewDevelopment()
+		defer logger.Sync()
+
 		browserFetcher, err := scraper.NewBrowserFetcher(
 			cfg.BrowserCookiesPath,
 			cfg.BrowserDisplay,
@@ -78,29 +84,67 @@ var enrichCmd = &cobra.Command{
 			log.Fatalf("Failed to get companies: %v", err)
 		}
 
-		count := 0
-		for _, c := range companies {
-			if count >= batchSize {
-				break
-			}
-			// Only enrich if it's new and scored
-			if c.Status != "NEW" || c.RelevanceScore == 0 {
-				continue
-			}
+		var targetCompanies []db.Company
 
-			fmt.Printf("▶ Enriching [%d/%d] %s...\n", count+1, batchSize, c.Name)
-			err := enr.EnrichCompany(ctx, c.ID, runID)
-			if err != nil {
-				fmt.Printf("  ❌ Error: %v\n", err)
-			} else {
-				fmt.Printf("  ✅ Done\n")
+		for _, c := range companies {
+			if c.Status == "NEW" && c.RelevanceScore > 0 {
+				targetCompanies = append(targetCompanies, c)
 			}
-			count++
-			
-			// Small delay to avoid aggressive scraping
-			time.Sleep(2 * time.Second)
 		}
 
-		fmt.Printf("\n✓ Enrichment complete. Processed %d companies.\n", count)
+		if len(targetCompanies) > batchSize {
+			targetCompanies = targetCompanies[:batchSize]
+		}
+
+		if len(targetCompanies) == 0 {
+			fmt.Println("No scored companies found for enrichment.")
+			return
+		}
+
+		// Initialize TUI
+		m := tui.NewPipelineModel(runID, logCh)
+		m.Total = len(targetCompanies)
+		p := tea.NewProgram(m)
+
+		// Run enrichment in background
+		go func() {
+			for _, c := range targetCompanies {
+				p.Send(tui.CompanyUpdateMsg{
+					ID:     c.ID,
+					Name:   c.Name,
+					Step:   "Researching",
+					Status: tui.StatusRunning,
+				})
+
+				err := enr.EnrichCompany(ctx, c.ID, runID)
+				
+				if err != nil {
+					p.Send(tui.CompanyUpdateMsg{
+						ID:      c.ID,
+						Name:    c.Name,
+						Step:    "Failed",
+						Status:  tui.StatusError,
+						Message: err.Error(),
+					})
+					logCh <- tui.LogMsg{Level: "ERROR", Text: fmt.Sprintf("Failed to enrich %s: %v", c.Name, err)}
+				} else {
+					p.Send(tui.CompanyUpdateMsg{
+						ID:     c.ID,
+						Name:   c.Name,
+						Step:   "Done",
+						Status: tui.StatusDone,
+					})
+					logCh <- tui.LogMsg{Level: "INFO", Text: fmt.Sprintf("Successfully enriched %s", c.Name)}
+				}
+				
+				// Small delay to avoid aggressive scraping
+				time.Sleep(1 * time.Second)
+			}
+			p.Send(tui.PipelineDoneMsg{})
+		}()
+
+		if _, err := p.Run(); err != nil {
+			log.Fatalf("TUI Error: %v", err)
+		}
 	},
 }

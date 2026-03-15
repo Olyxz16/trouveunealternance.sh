@@ -8,15 +8,17 @@ import (
 	"jobhunter/internal/enricher"
 	"jobhunter/internal/llm"
 	"jobhunter/internal/pipeline"
+	"jobhunter/internal/tui"
 	"log"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
 var (
-	depts       []string
+	depts        []string
 	minHeadcount int
 )
 
@@ -32,35 +34,48 @@ var scanCmd = &cobra.Command{
 	Short: "Scan SIRENE dataset for tech companies",
 	Run: func(cmd *cobra.Command, args []string) {
 		runID := uuid.New().String()
-		engine := pipeline.NewEngine(database)
+		
+		// Channel for TUI logs
+		logCh := make(chan tui.LogMsg, 100)
+		m := tui.NewPipelineModel(runID, logCh)
+		p := tea.NewProgram(m)
 
+		engine := pipeline.NewEngine(database)
 		sirene := collector.NewSireneCollector(database, cfg.SireneParquetPath, cfg.SireneULParquetPath)
 		
-		steps := []pipeline.Step{
-			{
-				Name:    "scan_sirene",
-				Timeout: 1 * time.Hour,
-				Fn: func(ctx context.Context, run *pipeline.Run) error {
-					total, new, err := sirene.Scan(ctx, depts, minHeadcount)
-					if err != nil {
-						return err
-					}
-					fmt.Printf("✓ SIRENE Scan complete: Found %d candidates, %d new added to DB.\n", total, new)
-					return nil
+		go func() {
+			steps := []pipeline.Step{
+				{
+					Name:    "scan_sirene",
+					Timeout: 1 * time.Hour,
+					Fn: func(ctx context.Context, run *pipeline.Run) error {
+						logCh <- tui.LogMsg{Level: "INFO", Text: "Starting SIRENE scan..."}
+						total, new, err := sirene.Scan(ctx, depts, minHeadcount)
+						if err != nil {
+							return err
+						}
+						logCh <- tui.LogMsg{Level: "INFO", Text: fmt.Sprintf("SIRENE Scan complete: Found %d candidates, %d new.", total, new)}
+						return nil
+					},
 				},
-			},
-			{
-				Name:    "score_new",
-				Timeout: 30 * time.Minute,
-				Fn: func(ctx context.Context, run *pipeline.Run) error {
-					return scoreUnscored(ctx, runID)
+				{
+					Name:    "score_new",
+					Timeout: 30 * time.Minute,
+					Fn: func(ctx context.Context, run *pipeline.Run) error {
+						return scoreUnscoredWithTUI(ctx, runID, p, logCh)
+					},
 				},
-			},
-		}
+			}
 
-		_, err := engine.Execute(context.Background(), runID, steps)
-		if err != nil {
-			log.Fatalf("Pipeline execution failed: %v", err)
+			_, err := engine.Execute(context.Background(), runID, steps)
+			if err != nil {
+				logCh <- tui.LogMsg{Level: "ERROR", Text: fmt.Sprintf("Pipeline failed: %v", err)}
+			}
+			p.Send(tui.PipelineDoneMsg{})
+		}()
+
+		if _, err := p.Run(); err != nil {
+			log.Fatalf("TUI Error: %v", err)
 		}
 	},
 }
@@ -69,14 +84,26 @@ var scoreCmd = &cobra.Command{
 	Use:   "score",
 	Short: "Score unscored companies in DB",
 	Run: func(cmd *cobra.Command, args []string) {
-		err := scoreUnscored(context.Background(), uuid.New().String())
-		if err != nil {
-			log.Fatalf("Scoring failed: %v", err)
+		runID := uuid.New().String()
+		logCh := make(chan tui.LogMsg, 100)
+		m := tui.NewPipelineModel(runID, logCh)
+		p := tea.NewProgram(m)
+
+		go func() {
+			err := scoreUnscoredWithTUI(context.Background(), runID, p, logCh)
+			if err != nil {
+				logCh <- tui.LogMsg{Level: "ERROR", Text: fmt.Sprintf("Scoring failed: %v", err)}
+			}
+			p.Send(tui.PipelineDoneMsg{})
+		}()
+
+		if _, err := p.Run(); err != nil {
+			log.Fatalf("TUI Error: %v", err)
 		}
 	},
 }
 
-func scoreUnscored(ctx context.Context, runID string) error {
+func scoreUnscoredWithTUI(ctx context.Context, runID string, p *tea.Program, logCh chan tui.LogMsg) error {
 	companies, err := database.GetCompaniesForEnrichment()
 	if err != nil {
 		return err
@@ -90,11 +117,14 @@ func scoreUnscored(ctx context.Context, runID string) error {
 	}
 
 	if len(unscored) == 0 {
-		fmt.Println("No unscored companies found.")
+		logCh <- tui.LogMsg{Level: "INFO", Text: "No unscored companies found."}
 		return nil
 	}
 
-	fmt.Printf("Scoring %d companies...\n", len(unscored))
+	logCh <- tui.LogMsg{Level: "INFO", Text: fmt.Sprintf("Scoring %d companies...", len(unscored))}
+	
+	// We can't easily update the 'Total' in the model from here without some changes
+	// but we can send updates for each company.
 
 	// Setup LLM
 	var primary, fallback llm.Provider
@@ -114,13 +144,32 @@ func scoreUnscored(ctx context.Context, runID string) error {
 	classifier := enricher.NewClassifier(llmClient, database)
 
 	for _, c := range unscored {
-		fmt.Printf("  Scoring %s...", c.Name)
+		p.Send(tui.CompanyUpdateMsg{
+			ID:     c.ID,
+			Name:   c.Name,
+			Step:   "Scoring",
+			Status: tui.StatusRunning,
+		})
+
 		score, err := classifier.ScoreCompany(ctx, c, runID)
 		if err != nil {
-			fmt.Printf(" ❌ Error: %v\n", err)
+			p.Send(tui.CompanyUpdateMsg{
+				ID:      c.ID,
+				Name:    c.Name,
+				Step:    "Failed",
+				Status:  tui.StatusError,
+				Message: err.Error(),
+			})
+			logCh <- tui.LogMsg{Level: "ERROR", Text: fmt.Sprintf("Failed to score %s: %v", c.Name, err)}
 			continue
 		}
-		fmt.Printf(" ✅ %s (Score: %d)\n", score.CompanyType, score.RelevanceScore)
+
+		p.Send(tui.CompanyUpdateMsg{
+			ID:     c.ID,
+			Name:   c.Name,
+			Step:   fmt.Sprintf("Scored: %d", score.RelevanceScore),
+			Status: tui.StatusDone,
+		})
 	}
 
 	return nil
