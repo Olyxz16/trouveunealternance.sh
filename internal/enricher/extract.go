@@ -6,48 +6,49 @@ import (
 	"jobhunter/internal/llm"
 )
 
-type RawCompanyPage struct {
-	Name                  string   `json:"name"`
-	Description           string   `json:"description"`
-	City                  string   `json:"city"`
-	Headcount             string   `json:"headcount"`
-	TechStack             []string `json:"tech_stack"`
-	GithubOrg             string   `json:"github_org"`
-	EngineeringBlogURL    string   `json:"engineering_blog_url"`
-	OpenSourceMentioned   bool     `json:"open_source_mentioned"`
-	InfraKeywords         []string `json:"infrastructure_keywords"`
-	
-	ContactName           string   `json:"contact_name"`
-	ContactRole           string   `json:"contact_role"`
-	ContactLinkedin       string   `json:"contact_linkedin"`
-	ContactEmail          string   `json:"contact_email"`
-	
-	CompanyType           string   `json:"company_type"` // TECH | TECH_ADJACENT | NON_TECH
-	HasInternalTechTeam   bool     `json:"has_internal_tech_team"`
-	TechTeamSignals       []string `json:"tech_team_signals"`
+// CompanyPageData — extracted from company LinkedIn page or website.
+// Company-level data ONLY. No individual people.
+type CompanyPageData struct {
+	Name                string   `json:"name"`
+	Description         string   `json:"description"`
+	City                string   `json:"city"`
+	Headcount           string   `json:"headcount"`
+	TechStack           []string `json:"tech_stack"`
+	Website             string   `json:"website"`
+	CareersPageURL      string   `json:"careers_page_url"`
+	CompanyEmail        string   `json:"company_email"` // generic: careers@, contact@, info@
+	GithubOrg           string   `json:"github_org"`
+	EngineeringBlogURL  string   `json:"engineering_blog_url"`
+	OpenSourceMentioned bool     `json:"open_source_mentioned"`
+	InfraKeywords       []string `json:"infrastructure_keywords"`
+	CompanyType         string   `json:"company_type"`
+	HasInternalTechTeam bool     `json:"has_internal_tech_team"`
+	TechTeamSignals     []string `json:"tech_team_signals"`
 }
 
-const ExtractionSystemPrompt = `You are a technical recruiter and OSINT expert. 
-Your task is to extract structured company information from the provided markdown content of a company's career page or LinkedIn profile.
+const CompanyExtractionPrompt = `You are extracting COMPANY-LEVEL information from a company's LinkedIn page or website.
 
-Extraction focus:
-1. Identify if the company is a 'TECH' company (product is software/infra), 'TECH_ADJACENT' (retail, logistics, bank with a large internal tech team), or 'NON_TECH'.
-2. Look for signals of an internal engineering team: job postings for DevOps/SRE/Backend, mentions of an engineering culture, a tech blog, or specific tech stacks.
-3. Find a primary technical contact (CTO, VP Eng, Engineering Manager) or a technical recruiter.
+CRITICAL: Do NOT extract individual people's contact details. That is a separate step.
 
-Return only a valid JSON object matching the requested schema.
-`
+Rules:
+- website: the company's public website URL (not LinkedIn)
+- careers_page_url: direct URL to their jobs/careers page if visible
+- company_email: a generic company contact address (careers@, jobs@, contact@, info@) if visible — NOT an individual's personal email
+- Do NOT include any /in/ LinkedIn profile URLs — only company-level data belongs here
+- company_type: TECH if core product is software/infra, TECH_ADJACENT if non-tech business with internal tech team, NON_TECH otherwise
 
-func (c *Classifier) ExtractCompanyInfo(ctx context.Context, markdown string, runID string) (RawCompanyPage, error) {
-	var info RawCompanyPage
+Return ONLY a valid JSON object.`
+
+func (c *Classifier) ExtractCompanyInfo(ctx context.Context, markdown string, runID string) (CompanyPageData, error) {
+	var info CompanyPageData
 	req := llm.CompletionRequest{
-		System: ExtractionSystemPrompt,
+		System: CompanyExtractionPrompt,
 		User:   fmt.Sprintf("Content to extract:\n\n%s", markdown),
 	}
 
 	err := c.llm.CompleteJSON(ctx, req, "extract_company_info", runID, &info)
 	if err != nil {
-		return RawCompanyPage{}, err
+		return CompanyPageData{}, err
 	}
 
 	return info, nil

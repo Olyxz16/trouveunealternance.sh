@@ -43,6 +43,7 @@ type Company struct {
 	LegalName           sql.NullString `json:"legal_name"`
 	Acronym             sql.NullString `json:"acronym"`
 	NameNormalized      sql.NullString `json:"name_normalized"`
+	CompanyEmail        sql.NullString `json:"company_email"`
 }
 
 func (c Company) MarshalJSON() ([]byte, error) {
@@ -76,6 +77,7 @@ func (c Company) MarshalJSON() ([]byte, error) {
 		LegalName           string `json:"legal_name"`
 		Acronym             string `json:"acronym"`
 		NameNormalized      string `json:"name_normalized"`
+		CompanyEmail        string `json:"company_email"`
 	}{
 		Alias:               Alias(c),
 		Siren:               c.Siren.String,
@@ -110,6 +112,7 @@ func (c Company) MarshalJSON() ([]byte, error) {
 		LegalName:           c.LegalName.String,
 		Acronym:             c.Acronym.String,
 		NameNormalized:      c.NameNormalized.String,
+		CompanyEmail:        c.CompanyEmail.String,
 	})
 }
 
@@ -143,15 +146,15 @@ func (db *DB) UpsertCompany(c *Company) (int, bool, error) {
 			website, linkedin_url, twitter_url, github_url, tech_stack, description,
 			careers_page_url, source, status, relevance_score, notes, date_found,
 			company_type, has_internal_tech_team, tech_team_signals,
-			legal_name, acronym, name_normalized
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			legal_name, acronym, name_normalized, company_email
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		c.Name, c.Siren, c.Siret, c.NAFCode, c.NAFLabel, c.City, c.Department, c.Address,
 		c.HeadcountRange, c.HeadcountExact, c.CreationYear, c.LegalForm,
 		c.Website, c.LinkedinURL, c.TwitterURL, c.GithubURL, c.TechStack, c.Description,
 		c.CareersPageURL, c.Source, c.Status, c.RelevanceScore, c.Notes, c.DateFound,
 		c.CompanyType, c.HasInternalTechTeam, c.TechTeamSignals,
-		c.LegalName, c.Acronym, c.NameNormalized,
+		c.LegalName, c.Acronym, c.NameNormalized, c.CompanyEmail,
 	)
 	if err != nil {
 		return 0, false, err
@@ -185,10 +188,13 @@ func (db *DB) UpdateCompany(id int, fields map[string]interface{}) error {
 	return err
 }
 
+const allCompanyCols = `id, name, siren, siret, naf_code, naf_label, city, department, address, headcount_range, headcount_exact, creation_year, legal_form, website, linkedin_url, twitter_url, github_url, tech_stack, description, contact_name, contact_role, contact_email, contact_linkedin, careers_page_url, source, status, relevance_score, email_draft, notes, date_found, updated_at, primary_contact_id, company_type, has_internal_tech_team, tech_team_signals, legal_name, acronym, name_normalized, company_email`
+
 func (db *DB) GetCompany(id int) (*Company, error) {
 	var c Company
 	var contactName, contactRole, contactEmail, contactLinkedin sql.NullString
-	err := db.QueryRow("SELECT * FROM companies WHERE id=?", id).Scan(
+	query := fmt.Sprintf("SELECT %s FROM companies WHERE id=?", allCompanyCols)
+	err := db.QueryRow(query, id).Scan(
 		&c.ID, &c.Name, &c.Siren, &c.Siret, &c.NAFCode, &c.NAFLabel,
 		&c.City, &c.Department, &c.Address,
 		&c.HeadcountRange, &c.HeadcountExact, &c.CreationYear, &c.LegalForm,
@@ -197,7 +203,7 @@ func (db *DB) GetCompany(id int) (*Company, error) {
 		&contactName, &contactRole, &contactEmail, &contactLinkedin,
 		&c.CareersPageURL, &c.Source, &c.Status, &c.RelevanceScore, &c.EmailDraft, &c.Notes,
 		&c.DateFound, &c.UpdatedAt, &c.PrimaryContactID, &c.CompanyType, &c.HasInternalTechTeam, &c.TechTeamSignals,
-		&c.LegalName, &c.Acronym, &c.NameNormalized,
+		&c.LegalName, &c.Acronym, &c.NameNormalized, &c.CompanyEmail,
 	)
 	if err != nil {
 		return nil, err
@@ -206,7 +212,8 @@ func (db *DB) GetCompany(id int) (*Company, error) {
 }
 
 func (db *DB) GetCompaniesForEnrichment() ([]Company, error) {
-	rows, err := db.Query("SELECT * FROM companies WHERE status = 'NEW' AND (primary_contact_id IS NULL OR company_type = 'UNKNOWN')")
+	query := fmt.Sprintf("SELECT %s FROM companies WHERE status = 'NEW' AND (primary_contact_id IS NULL OR company_type = 'UNKNOWN')", allCompanyCols)
+	rows, err := db.Query(query)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +232,7 @@ func (db *DB) GetCompaniesForEnrichment() ([]Company, error) {
 			&contactName, &contactRole, &contactEmail, &contactLinkedin,
 			&c.CareersPageURL, &c.Source, &c.Status, &c.RelevanceScore, &c.EmailDraft, &c.Notes,
 			&c.DateFound, &c.UpdatedAt, &c.PrimaryContactID, &c.CompanyType, &c.HasInternalTechTeam, &c.TechTeamSignals,
-			&c.LegalName, &c.Acronym, &c.NameNormalized,
+			&c.LegalName, &c.Acronym, &c.NameNormalized, &c.CompanyEmail,
 		)
 		if err != nil {
 			return nil, err

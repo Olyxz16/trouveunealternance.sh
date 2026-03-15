@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"jobhunter/internal/collector"
 	"jobhunter/internal/db"
-	"jobhunter/internal/llm"
 	"jobhunter/internal/scraper"
 	"log"
 	"strings"
@@ -27,44 +26,13 @@ func NewEnricher(database *db.DB, fetcher *scraper.CascadeFetcher, classifier *C
 	}
 }
 
-const ResearchSystemPrompt = `You are a technical recruiter and OSINT expert.
-Your task is to research a French company to find information for a DevOps/backend internship application.
-
-Use your browser tools to:
-1. Search for the company's LinkedIn company page.
-2. Find their official website.
-3. Extract their tech stack (Docker, K8s, Cloud providers, languages).
-4. Find a primary technical contact (CTO, Engineering Manager, Tech Lead) or Recruiter.
-5. Identify if they are TECH, TECH_ADJACENT, or NON_TECH.
-
-IMPORTANT: If the company is a one-person business, a freelancer, or an individual (auto-entrepreneur), classify it as NON_TECH and set status to 'PASS'. We only want companies with an internal tech team.
-
-Return ONLY a JSON object with:
-{
-  "official_name": "the full, correct name of the company",
-  "website": "url",
-  "linkedin_url": "url",
-  "description": "short summary",
-  "tech_stack": "comma-separated list",
-  "company_type": "TECH | TECH_ADJACENT | NON_TECH",
-  "has_internal_tech_team": true/false,
-  "tech_team_signals": ["signal 1", "signal 2"],
-  "contact_name": "name or null",
-  "contact_role": "role or null",
-  "contact_linkedin": "profile url or null",
-  "contact_email": "email if public",
-  "is_freelancer": true/false,
-  "status_override": "ENRICHED | PASS"
-}
-`
-
 func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) error {
 	comp, err := e.db.GetCompany(compID)
 	if err != nil {
 		return err
 	}
 
-	// 0. Fix generic name if possible
+	// 0. Resolve generic name if possible (Stage 0)
 	if (strings.HasPrefix(comp.Name, "Company ") || comp.Name == "") && comp.Siren.Valid {
 		log.Printf("Resolving generic name for SIREN %s via Recherche API...", comp.Siren.String)
 		info, err := e.recherche.GetCompanyInfo(ctx, comp.Siren.String)
@@ -78,111 +46,137 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 				"name":    comp.Name,
 				"website": comp.Website,
 			})
-		} else {
-			log.Printf("Warning: Name resolution failed for %s: %v", comp.Siren.String, err)
 		}
 	}
 
-	fmt.Printf("  🔍 Researching %s (%s)...\n", comp.Name, comp.City.String)
+	fmt.Printf("▶ Enriching %s...\n", comp.Name)
 
-	// 1. Send research task to LLM
-	var researchResult struct {
-		OfficialName        string   `json:"official_name"`
-		Website             string   `json:"website"`
-		LinkedinURL         string   `json:"linkedin_url"`
-		Description         string   `json:"description"`
-		TechStack           string   `json:"tech_stack"`
-		CompanyType         string   `json:"company_type"`
-		HasInternalTechTeam bool     `json:"has_internal_tech_team"`
-		TechTeamSignals     []string `json:"tech_team_signals"`
-		ContactName         string   `json:"contact_name"`
-		ContactRole         string   `json:"contact_role"`
-		ContactLinkedin     string   `json:"contact_linkedin"`
-		ContactEmail        string   `json:"contact_email"`
-		IsFreelancer        bool     `json:"is_freelancer"`
-		StatusOverride      string   `json:"status_override"`
+	// 1. Discover URLs if missing
+	website := comp.Website.String
+	linkedin := comp.LinkedinURL.String
+	if website == "" || linkedin == "" {
+		disc := NewURLDiscoverer(e.fetcher)
+		w, l, err := disc.DiscoverURLs(ctx, *comp)
+		if err == nil {
+			if website == "" {
+				website = w
+			}
+			if linkedin == "" {
+				linkedin = l
+			}
+			_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{
+				"website":      website,
+				"linkedin_url": linkedin,
+			})
+		}
 	}
 
-	prompt := fmt.Sprintf("Research company: %s in %s. SIREN: %s. NAF: %s", 
-		comp.Name, comp.City.String, comp.Siren.String, comp.NAFLabel.String)
-	req := llm.CompletionRequest{
-		System: ResearchSystemPrompt,
-		User:   prompt,
+	// 2. Fetch main page (LinkedIn or Website)
+	targetURL := linkedin
+	if targetURL == "" {
+		targetURL = website
+	}
+	if targetURL == "" {
+		return fmt.Errorf("no URL found for company %s", comp.Name)
 	}
 
-	err = e.classifier.llm.CompleteJSON(ctx, req, "research_company", runID, &researchResult)
+	res, err := e.fetcher.Fetch(ctx, targetURL)
 	if err != nil {
-		return fmt.Errorf("research failed: %w", err)
+		return fmt.Errorf("fetch failed for %s: %w", targetURL, err)
 	}
 
-	// 2. Update Company
-	if researchResult.OfficialName != "" {
-		comp.Name = researchResult.OfficialName
-	}
-
-	status := "ENRICHED"
-	if researchResult.IsFreelancer || researchResult.StatusOverride == "PASS" {
-		status = "PASS"
+	// 3. Extract company-level info
+	info, err := e.classifier.ExtractCompanyInfo(ctx, res.ContentMD, runID)
+	if err != nil {
+		return fmt.Errorf("company extraction failed: %w", err)
 	}
 
 	updates := map[string]interface{}{
-		"name":                   comp.Name,
-		"company_type":           researchResult.CompanyType,
-		"has_internal_tech_team": researchResult.HasInternalTechTeam,
-		"tech_team_signals":      strings.Join(researchResult.TechTeamSignals, ", "),
-		"status":                 status,
+		"description":            info.Description,
+		"tech_stack":             strings.Join(info.TechStack, ", "),
+		"website":                firstNonEmpty(info.Website, website),
+		"careers_page_url":       info.CareersPageURL,
+		"company_email":          info.CompanyEmail,
+		"has_internal_tech_team": info.HasInternalTechTeam,
+		"tech_team_signals":      strings.Join(info.TechTeamSignals, ", "),
 	}
-
-	if researchResult.Website != "" {
-		updates["website"] = researchResult.Website
+	if comp.CompanyType == "UNKNOWN" {
+		updates["company_type"] = info.CompanyType
 	}
-	if researchResult.LinkedinURL != "" {
-		updates["linkedin_url"] = researchResult.LinkedinURL
-	}
-	if researchResult.Description != "" {
-		updates["description"] = researchResult.Description
-	}
-	if researchResult.TechStack != "" {
-		updates["tech_stack"] = researchResult.TechStack
-	}
-
 	_ = e.db.UpdateCompany(comp.ID, updates)
 
-	// 3. Save contact if found
-	if researchResult.ContactName != "" {
+	// 4. Discover individuals from LinkedIn People tab
+	if linkedin == "" {
+		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "NO_CONTACT_FOUND"})
+		return nil
+	}
+
+	peopleURL := strings.TrimSuffix(linkedin, "/") + "/people/"
+	peopleRes, err := e.fetcher.Fetch(ctx, peopleURL)
+	if err != nil {
+		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "NO_CONTACT_FOUND"})
+		return nil
+	}
+
+	people, err := e.classifier.ExtractPeopleFromPage(ctx, peopleRes.ContentMD, runID)
+	if err != nil || len(people.Contacts) == 0 {
+		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "NO_CONTACT_FOUND"})
+		return nil
+	}
+
+	// 5. Enrich top candidates from their individual /in/ profiles (max 3)
+	maxProfiles := 3
+	enriched := make([]IndividualContact, 0, len(people.Contacts))
+	for i, candidate := range people.Contacts {
+		if i >= maxProfiles {
+			// Save remaining candidates without profile enrichment
+			enriched = append(enriched, candidate)
+			continue
+		}
+		profile, _ := e.classifier.EnrichIndividualProfile(ctx, e.fetcher, candidate, runID)
+		// Merge profile data back into candidate
+		if profile.Email != "" && candidate.Email == "" {
+			candidate.Email = profile.Email
+		}
+		// You can also use profile.RecentPosts or profile.Background if we add a place for them
+		enriched = append(enriched, candidate)
+	}
+
+	// 6. Rank to find best contact
+	best, _ := e.classifier.RankContacts(ctx, enriched, info.CompanyType, runID)
+
+	// 7. Save ALL contacts, mark best as primary
+	var primaryContactID int
+	for _, candidate := range enriched {
+		isPrimary := best != nil && candidate.Name == best.Name
 		contactID, err := e.db.AddContact(&db.Contact{
 			CompanyID:   comp.ID,
-			Name:        db.ToNullString(researchResult.ContactName),
-			Role:        db.ToNullString(researchResult.ContactRole),
-			LinkedinURL: db.ToNullString(researchResult.ContactLinkedin),
-			Email:       db.ToNullString(researchResult.ContactEmail),
+			Name:        db.ToNullString(candidate.Name),
+			Role:        db.ToNullString(candidate.Role),
+			LinkedinURL: db.ToNullString(candidate.LinkedinURL),
+			Email:       db.ToNullString(candidate.Email),
 			Source:      db.ToNullString("linkedin"),
 			Confidence:  db.ToNullString("probable"),
-		}, true)
-		if err == nil {
-			_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{
-				"primary_contact_id": contactID,
-				"status":            "TO_CONTACT",
-			})
+		}, isPrimary)
+		if err == nil && isPrimary {
+			primaryContactID = contactID
 		}
-	} else if status == "ENRICHED" {
-		// If research succeeded but no contact was found, set specific status
-		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{
-			"status": "NO_CONTACT_FOUND",
-		})
 	}
+
+	status := "NO_CONTACT_FOUND"
+	if primaryContactID > 0 {
+		status = "TO_CONTACT"
+	}
+	_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": status})
 
 	return nil
 }
 
-// Add a helper to Classifier to avoid circular dependency or messy wiring
-func (c *Classifier) DiscoverLinkedInContactsWithMD(ctx context.Context, markdown string, companyType string, runID string) (ContactResult, error) {
-	var result ContactResult
-	req := llm.CompletionRequest{
-		System: fmt.Sprintf(ContactSelectionPrompt, companyType),
-		User:   fmt.Sprintf("Markdown from LinkedIn People tab:\n\n%s", markdown),
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if v != "" {
+			return v
+		}
 	}
-
-	err := c.llm.CompleteJSON(ctx, req, "select_best_contact", runID, &result)
-	return result, err
+	return ""
 }
