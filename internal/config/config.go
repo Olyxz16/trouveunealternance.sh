@@ -8,17 +8,20 @@ import (
 )
 
 type Config struct {
-	DBPath             string `env:"DB_PATH" envDefault:"data/jobs.db"`
-	SireneParquetPath  string `env:"SIRENE_PARQUET_PATH" envDefault:"data/sirene_etablissements.parquet"`
+	DBPath              string `env:"DB_PATH" envDefault:"data/jobs.db"`
+	SireneParquetPath   string `env:"SIRENE_PARQUET_PATH" envDefault:"data/sirene_etablissements.parquet"`
 	SireneULParquetPath string `env:"SIRENE_UL_PARQUET_PATH" envDefault:"data/sirene_unites_legales.parquet"`
-	OpenRouterAPIKey   string `env:"OPENROUTER_API_KEY"`
-	OpenRouterModel    string `env:"OPENROUTER_MODEL" envDefault:"google/gemini-2.5-flash-lite"`
-	OpenRouterRPM      int    `env:"OPENROUTER_RPM" envDefault:"60"`
-	GeminiCLIPath      string `env:"GEMINI_CLI_PATH" envDefault:"gemini"`
-	LLMPrimary         string `env:"LLM_PRIMARY" envDefault:"openrouter"` // or gemini_cli
-	LLMFallback        string `env:"LLM_FALLBACK" envDefault:"gemini_cli"`
-	MCPHost            string `env:"MCP_HOST" envDefault:"http://localhost:3000"`
-	ForceMCPDomains    string `env:"FORCE_MCP_DOMAINS" envDefault:"linkedin.com"`
+	OpenRouterAPIKey    string `env:"OPENROUTER_API_KEY"`
+	OpenRouterModel     string `env:"OPENROUTER_MODEL" envDefault:"google/gemini-2.5-flash-lite"`
+	OpenRouterRPM       int    `env:"OPENROUTER_RPM" envDefault:"60"`
+	GeminiCLIPath       string `env:"GEMINI_CLI_PATH" envDefault:"gemini"`
+	LLMPrimary          string `env:"LLM_PRIMARY" envDefault:"openrouter"` // or gemini_cli
+	LLMFallback         string `env:"LLM_FALLBACK" envDefault:"gemini_cli"`
+	BrowserCookiesPath  string `env:"BROWSER_COOKIES_PATH"    envDefault:"data/browser_session.json"`
+	BrowserDisplay      string `env:"BROWSER_DISPLAY"         envDefault:""`
+	BrowserHeadless     bool   `env:"BROWSER_HEADLESS"        envDefault:"true"`
+	BrowserBinaryPath   string `env:"BROWSER_BINARY_PATH"     envDefault:""`
+	ForceBrowserDomains string `env:"FORCE_BROWSER_DOMAINS"   envDefault:"linkedin.com,duckduckgo.com"`
 }
 
 func Load() *Config {

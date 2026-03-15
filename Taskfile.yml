@@ -19,7 +19,7 @@ tasks:
       - go run . score
 
   enrich:
-    desc: Enrich scored prospects via website + LinkedIn (use BATCH=10)
+    desc: Enrich scored prospects (use BATCH=10, ensure browser session exists)
     cmds:
       - go run . enrich --batch {{.BATCH}}
 
@@ -49,10 +49,15 @@ tasks:
     cmds:
       - go run . dashboard
 
-  bridge:
-    desc: Start the MCP Browser Bridge on port 3000
+  login:
+    desc: Open browser for manual LinkedIn login (run once per machine)
     cmds:
-      - go run . bridge
+      - go run . login
+
+  enrich-server:
+    desc: Enrich on headless server via Xvfb
+    cmds:
+      - xvfb-run -a -s "-screen 0 1920x1080x24" go run . enrich --batch {{.BATCH}}
 
   # ── UTILS ───────────────────────────────────────────────────────────────────
 

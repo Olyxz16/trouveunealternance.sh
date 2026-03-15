@@ -12,22 +12,22 @@ import (
 )
 
 type CascadeFetcher struct {
-	primary   Fetcher
-	fallback  Fetcher
-	forceMCP  []string
-	cache     *db.DB
-	extractor *Extractor
-	logger    *zap.Logger
+	primary      Fetcher
+	fallback     Fetcher
+	forceBrowser []string
+	cache        *db.DB
+	extractor    *Extractor
+	logger       *zap.Logger
 }
 
-func NewCascadeFetcher(primary Fetcher, fallback Fetcher, forceMCP []string, cache *db.DB, extractor *Extractor, logger *zap.Logger) *CascadeFetcher {
+func NewCascadeFetcher(primary Fetcher, fallback Fetcher, forceBrowser []string, cache *db.DB, extractor *Extractor, logger *zap.Logger) *CascadeFetcher {
 	return &CascadeFetcher{
-		primary:   primary,
-		fallback:  fallback,
-		forceMCP:  forceMCP,
-		cache:     cache,
-		extractor: extractor,
-		logger:    logger,
+		primary:      primary,
+		fallback:     fallback,
+		forceBrowser: forceBrowser,
+		cache:        cache,
+		extractor:    extractor,
+		logger:       logger,
 	}
 }
 
@@ -44,17 +44,17 @@ func (c *CascadeFetcher) Fetch(ctx context.Context, url string) (FetchResult, er
 		c.logger.Warn("cache error", zap.Error(err))
 	}
 
-	// 2. Force MCP?
-	useFallback := false
-	for _, domain := range c.forceMCP {
+	// 2. Force Browser?
+	useBrowser := false
+	for _, domain := range c.forceBrowser {
 		if strings.Contains(url, domain) {
-			useFallback = true
+			useBrowser = true
 			break
 		}
 	}
 
-	if useFallback {
-		c.logger.Info("forcing MCP for domain", zap.String("url", url))
+	if useBrowser {
+		c.logger.Info("forcing browser for domain", zap.String("url", url))
 		return c.tryFetcher(ctx, c.fallback, url)
 	}
 

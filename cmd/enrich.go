@@ -52,11 +52,23 @@ var enrichCmd = &cobra.Command{
 
 		// Setup Scraper
 		httpFetcher := scraper.NewHTTPFetcher()
-		mcpFetcher := scraper.NewMCPFetcher(cfg.MCPHost)
-		forceDomains := strings.Split(cfg.ForceMCPDomains, ",")
+		
+		browserFetcher, err := scraper.NewBrowserFetcher(
+			cfg.BrowserCookiesPath,
+			cfg.BrowserDisplay,
+			cfg.BrowserHeadless,
+			cfg.BrowserBinaryPath,
+			logger,
+		)
+		if err != nil {
+			log.Fatalf("Failed to start browser: %v", err)
+		}
+		defer browserFetcher.Close()
+
+		forceDomains := strings.Split(cfg.ForceBrowserDomains, ",")
 		extractor := scraper.NewExtractor()
 		
-		cascade := scraper.NewCascadeFetcher(httpFetcher, mcpFetcher, forceDomains, database, extractor, logger)
+		cascade := scraper.NewCascadeFetcher(httpFetcher, browserFetcher, forceDomains, database, extractor, logger)
 		
 		enr := enricher.NewEnricher(database, cascade, classifier)
 
