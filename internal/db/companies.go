@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -39,6 +40,77 @@ type Company struct {
 	HasInternalTechTeam sql.NullBool   `json:"has_internal_tech_team"`
 	TechTeamSignals     sql.NullString `json:"tech_team_signals"`
 	PrimaryContactID    sql.NullInt64  `json:"primary_contact_id"`
+	LegalName           sql.NullString `json:"legal_name"`
+	Acronym             sql.NullString `json:"acronym"`
+	NameNormalized      sql.NullString `json:"name_normalized"`
+}
+
+func (c Company) MarshalJSON() ([]byte, error) {
+	type Alias Company
+	return json.Marshal(&struct {
+		Alias
+		Siren               string `json:"siren"`
+		Siret               string `json:"siret"`
+		NAFCode             string `json:"naf_code"`
+		NAFLabel            string `json:"naf_label"`
+		City                string `json:"city"`
+		Department          string `json:"department"`
+		Address             string `json:"address"`
+		HeadcountRange      string `json:"headcount_range"`
+		HeadcountExact      int64  `json:"headcount_exact"`
+		CreationYear        int64  `json:"creation_year"`
+		LegalForm           string `json:"legal_form"`
+		Website             string `json:"website"`
+		LinkedinURL         string `json:"linkedin_url"`
+		TwitterURL          string `json:"twitter_url"`
+		GithubURL           string `json:"github_url"`
+		TechStack           string `json:"tech_stack"`
+		Description         string `json:"description"`
+		CareersPageURL      string `json:"careers_page_url"`
+		Source              string `json:"source"`
+		EmailDraft          string `json:"email_draft"`
+		Notes               string `json:"notes"`
+		HasInternalTechTeam *bool  `json:"has_internal_tech_team"`
+		TechTeamSignals     string `json:"tech_team_signals"`
+		PrimaryContactID    int64  `json:"primary_contact_id"`
+		LegalName           string `json:"legal_name"`
+		Acronym             string `json:"acronym"`
+		NameNormalized      string `json:"name_normalized"`
+	}{
+		Alias:               Alias(c),
+		Siren:               c.Siren.String,
+		Siret:               c.Siret.String,
+		NAFCode:             c.NAFCode.String,
+		NAFLabel:            c.NAFLabel.String,
+		City:                c.City.String,
+		Department:          c.Department.String,
+		Address:             c.Address.String,
+		HeadcountRange:      c.HeadcountRange.String,
+		HeadcountExact:      c.HeadcountExact.Int64,
+		CreationYear:        c.CreationYear.Int64,
+		LegalForm:           c.LegalForm.String,
+		Website:             c.Website.String,
+		LinkedinURL:         c.LinkedinURL.String,
+		TwitterURL:          c.TwitterURL.String,
+		GithubURL:           c.GithubURL.String,
+		TechStack:           c.TechStack.String,
+		Description:         c.Description.String,
+		CareersPageURL:      c.CareersPageURL.String,
+		Source:              c.Source.String,
+		EmailDraft:          c.EmailDraft.String,
+		Notes:               c.Notes.String,
+		HasInternalTechTeam: func() *bool {
+			if c.HasInternalTechTeam.Valid {
+				return &c.HasInternalTechTeam.Bool
+			}
+			return nil
+		}(),
+		TechTeamSignals:     c.TechTeamSignals.String,
+		PrimaryContactID:    c.PrimaryContactID.Int64,
+		LegalName:           c.LegalName.String,
+		Acronym:             c.Acronym.String,
+		NameNormalized:      c.NameNormalized.String,
+	})
 }
 
 func (db *DB) UpsertCompany(c *Company) (int, bool, error) {
@@ -70,14 +142,16 @@ func (db *DB) UpsertCompany(c *Company) (int, bool, error) {
 			headcount_range, headcount_exact, creation_year, legal_form,
 			website, linkedin_url, twitter_url, github_url, tech_stack, description,
 			careers_page_url, source, status, relevance_score, notes, date_found,
-			company_type, has_internal_tech_team, tech_team_signals
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			company_type, has_internal_tech_team, tech_team_signals,
+			legal_name, acronym, name_normalized
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`,
 		c.Name, c.Siren, c.Siret, c.NAFCode, c.NAFLabel, c.City, c.Department, c.Address,
 		c.HeadcountRange, c.HeadcountExact, c.CreationYear, c.LegalForm,
 		c.Website, c.LinkedinURL, c.TwitterURL, c.GithubURL, c.TechStack, c.Description,
 		c.CareersPageURL, c.Source, c.Status, c.RelevanceScore, c.Notes, c.DateFound,
 		c.CompanyType, c.HasInternalTechTeam, c.TechTeamSignals,
+		c.LegalName, c.Acronym, c.NameNormalized,
 	)
 	if err != nil {
 		return 0, false, err
@@ -123,6 +197,7 @@ func (db *DB) GetCompany(id int) (*Company, error) {
 		&contactName, &contactRole, &contactEmail, &contactLinkedin,
 		&c.CareersPageURL, &c.Source, &c.Status, &c.RelevanceScore, &c.EmailDraft, &c.Notes,
 		&c.DateFound, &c.UpdatedAt, &c.PrimaryContactID, &c.CompanyType, &c.HasInternalTechTeam, &c.TechTeamSignals,
+		&c.LegalName, &c.Acronym, &c.NameNormalized,
 	)
 	if err != nil {
 		return nil, err
@@ -150,6 +225,7 @@ func (db *DB) GetCompaniesForEnrichment() ([]Company, error) {
 			&contactName, &contactRole, &contactEmail, &contactLinkedin,
 			&c.CareersPageURL, &c.Source, &c.Status, &c.RelevanceScore, &c.EmailDraft, &c.Notes,
 			&c.DateFound, &c.UpdatedAt, &c.PrimaryContactID, &c.CompanyType, &c.HasInternalTechTeam, &c.TechTeamSignals,
+			&c.LegalName, &c.Acronym, &c.NameNormalized,
 		)
 		if err != nil {
 			return nil, err

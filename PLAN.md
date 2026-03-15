@@ -1,991 +1,464 @@
-# JobHunter Go — Transition & Pipeline Architecture
+# JobHunter — Technical Roadmap (Go)
 
-> This document covers: the Go pipeline tooling decision, the full pipeline
-> design across all four stages, how to handle browser automation, metrics,
-> and LLM cost tracking — and the concrete steps to rebuild the project.
-
----
-
-## 1. The Pipeline Tooling Question
-
-You asked for "a Dagster equivalent for Go." The short answer is: **there isn't
-one worth using.** Here is why, and what to do instead.
-
-### What exists in Go
-
-| Tool | Backed by | Problem |
-|---|---|---|
-| Temporal | Temporal server (Docker) | Needs a server, designed for distributed teams, enormous ops overhead for a single-user tool |
-| River | PostgreSQL | Requires Postgres — you're on SQLite |
-| Asynq / Machinery | Redis | Same: external broker required |
-| Watermill | Kafka / Redis / AMQP | Pub/sub framework, not a pipeline orchestrator |
-
-None of these are a good fit. They all assume you're building a distributed
-system with multiple workers and external infrastructure.
-
-### What you actually need
-
-Dagster's value for your use case comes down to three things:
-
-1. **Run tracking** — every pipeline execution has an ID, a start time, a status
-2. **Step tracking** — each step within a run has its own status, duration, error
-3. **Resumability** — if a run fails halfway, you can re-run only the failed steps
-
-You already have tables for this: `run_log`. The missing piece is a thin
-**pipeline engine** built directly on SQLite. This is 200–300 lines of Go, not
-a third-party service.
-
-### The design: a lightweight pipeline engine
-
-The core idea is a `Pipeline` struct that wraps steps, persists every state
-transition to SQLite, and exposes the same observability Dagster would give you
-— but with zero external dependencies.
-
-```
-Run
- ├── Step: collect          (ok / error / skipped)
- ├── Step: import           (ok / error / skipped)
- ├── Step: enrich[company]  (ok / error / needs_review)
- └── Step: generate[company](ok / error / skipped)
-```
-
-Each step is a Go function with a fixed signature:
-
-```go
-type StepFn func(ctx context.Context, run *Run) error
-
-type Step struct {
-    Name    string
-    Fn      StepFn
-    Timeout time.Duration
-}
-```
-
-The engine runs steps in order, catches panics, writes to `run_log` on every
-state transition, and returns a structured result. Steps can be run in parallel
-with a configurable concurrency limit (e.g. 3 companies enriched at once).
-
-The dashboard (already built) reads from `run_log` and renders exactly this —
-which means **you already have the Dagster UI equivalent**, it just needs the
-Go engine writing to the same tables.
-
-**This is the approach. No third-party orchestrator needed.**
+> Living reference document. Reflects the actual Go codebase.
+> Python POC is archived in `old/`. All decisions below apply to the Go rewrite.
 
 ---
 
-## 2. Fetching & Content Extraction
+## Architecture Overview
 
-### No Jina — local-first pipeline
-
-Jina's actual value is the fetch layer, not the markdown conversion. The
-conversion step — which is all you'd be paying for — is trivially replaceable
-with local libraries. More importantly, Jina can't handle LinkedIn or any
-page requiring a real session. The architecture below has no external API
-dependency in the hot path.
-
-### The Fetcher interface
-
-Every fetch backend implements a single interface that returns raw HTML:
-
-```go
-// internal/scraper/fetcher.go
-
-type Fetcher interface {
-    Fetch(ctx context.Context, url string) (string, error) // returns raw HTML
-    Name() string
-}
-```
-
-Two implementations:
-
-```go
-// internal/scraper/http.go
-// Plain net/http GET. Fast (~200ms), no external dependency.
-// Works for most company websites and career pages.
-type HTTPFetcher struct {
-    client *http.Client
-}
-
-// internal/scraper/mcp.go
-// Calls Blueprint MCP — your real Firefox session.
-// Handles JS rendering, CAPTCHAs, bot detection, and auth-required pages.
-// Works for LinkedIn, WTTJ with session, anything the browser can open.
-type MCPFetcher struct {
-    host string // http://localhost:3000
-}
-```
-
-### The CascadeFetcher
-
-A `CascadeFetcher` sits above both implementations and owns all the
-orchestration: cache, domain overrides, fallback logic, extraction, quality
-check. Callers never touch `HTTPFetcher` or `MCPFetcher` directly.
-
-```go
-// internal/scraper/cascade.go
-
-type CascadeFetcher struct {
-    primary   Fetcher    // HTTPFetcher
-    fallback  Fetcher    // MCPFetcher
-    forceMCP  []string   // domains that always skip primary (from FORCE_MCP_DOMAINS in .env)
-    cache     *db.DB
-    extractor *Extractor
-    logger    *zap.Logger
-}
-
-func (c *CascadeFetcher) Fetch(ctx context.Context, url string) (FetchResult, error) {
-    // 1. Cache check → return immediately if fresh
-    // 2. Domain in forceMCP list? → skip primary, go straight to fallback
-    // 3. Try primary (HTTPFetcher) → extract → quality check → cache → return
-    // 4. Primary failed or poor quality → try fallback (MCPFetcher) → extract → quality check → cache → return
-    // 5. Both failed → return NeedsReviewError, caller sets company status = NEEDS_REVIEW
-}
-
-type FetchResult struct {
-    ContentMD string
-    Method    string  // "http" | "mcp" | "cache" — for logging + health panel
-    Quality   float64 // 0.0–1.0
-}
-```
-
-`FORCE_MCP_DOMAINS` in `.env` is a comma-separated list of domains that always
-skip the HTTP fetcher. Start with `linkedin.com` — add others as you discover
-them without touching code:
-
-```env
-FORCE_MCP_DOMAINS=linkedin.com
-MCP_HOST=http://localhost:3000
-```
-
-### The extraction pipeline
-
-Once any fetcher returns raw HTML, the same local extraction pipeline runs
-regardless of which fetcher was used:
-
-```go
-// internal/scraper/extractor.go
-
-type Extractor struct{}
-
-func (e *Extractor) Extract(html, url string) (string, error) {
-    // 1. Site-specific preprocessor (strips known noise before extraction)
-    html = preprocess(html, url)
-
-    // 2. Trafilatura (primary — better recall on arbitrary pages)
-    if content := trafilatura.Extract(html); isGoodQuality(content) {
-        return content, nil
-    }
-
-    // 3. Readability (fallback — more conservative, better on article-like pages)
-    if content := readability.Extract(html); isGoodQuality(content) {
-        return content, nil
-    }
-
-    // 4. Raw body extraction (last resort — noisier but something is better than nothing)
-    return rawExtract(html), nil
-}
-```
-
-```go
-// internal/scraper/preprocessors.go
-
-func preprocess(html, url string) string {
-    switch {
-    case strings.Contains(url, "linkedin.com"):
-        return preprocessLinkedIn(html) // strips left nav, right sidebar, messaging overlay
-    default:
-        return html
-    }
-}
-```
-
-```go
-// internal/scraper/markdown.go
-// Wraps github.com/JohannesKaufmann/html-to-markdown/v2
-// Called by the Extractor after content isolation, before quality check.
-func ToMarkdown(html string) (string, error)
-```
-
-### Why this works for LinkedIn
-
-Previously LinkedIn was a special case that Jina couldn't handle. Now:
-
-1. `linkedin.com` is in `FORCE_MCP_DOMAINS` → always uses `MCPFetcher`
-2. MCP navigates with your real Firefox session → full rendered HTML returned
-3. `preprocessLinkedIn()` strips the chrome (nav, sidebar, overlays)
-4. Trafilatura extracts the main content cleanly
-5. html-to-markdown converts it
-
-The People tab for contact discovery follows the same path — MCP navigates,
-returns HTML, local pipeline extracts the contact list. No special casing
-anywhere above `CascadeFetcher`.
-
-### Full internal structure
-
-```
-internal/scraper/
-  fetcher.go        — Fetcher interface + FetchResult type
-  http.go           — HTTPFetcher (net/http GET)
-  mcp.go            — MCPFetcher (Blueprint MCP client)
-  cascade.go        — CascadeFetcher: cache, forceMCP, fallback, orchestration
-  extractor.go      — Trafilatura → Readability → raw cascade + quality check
-  preprocessors.go  — site-specific HTML cleanup (LinkedIn, others as needed)
-  markdown.go       — html-to-markdown wrapper (JohannesKaufmann/html-to-markdown/v2)
-```
-
-The People tab for contact discovery follows the same path — MCP navigates to
-the company's People tab, returns HTML, local pipeline extracts the contact
-list as markdown. No special casing anywhere above `CascadeFetcher`.
+| Concern | Decision |
+|---|---|
+| Language | Go 1.25 |
+| CLI | Cobra (`cmd/` flat package) |
+| Database | SQLite via `modernc.org/sqlite` (pure Go, no CGO), WAL mode |
+| Migrations | Embedded SQL files in `internal/db/migrations/`, applied at startup |
+| LLM | `Provider` interface — OpenRouter primary, Gemini CLI fallback |
+| Scraping | `Fetcher` interface — `HTTPFetcher` primary, `MCPFetcher` fallback via `CascadeFetcher` |
+| MCP browser | Local HTTP bridge (`cmd bridge`) wrapping chromedp — runs your real Chrome session |
+| HTML extraction | Trafilatura → Readability → raw, then html-to-markdown |
+| Pipeline observability | `pipeline_runs` + `run_log` tables, written by `internal/pipeline/engine.go` |
+| Config | `github.com/caarlos0/env/v11` struct tags + `godotenv` for `.env` loading |
+| Logging | `go.uber.org/zap` — structured fields, redirected to file during TUI sessions |
+| TUI | Charm stack: Bubble Tea + Bubbles + Lip Gloss + Huh |
+| Web dashboard | Single-file `static/index.html` served by chi (not yet built) |
 
 ---
 
-## 3. LLM Provider Interface
-
-Rather than hardcoding OpenRouter calls and bolting Gemini CLI on as a special
-case, model every LLM backend as an implementation of a single `Provider`
-interface. The client sits above it and owns all cross-cutting concerns: rate
-limiting, retry, usage logging. Swapping providers — or falling back — requires
-zero changes outside `internal/llm`.
-
-```go
-// internal/llm/provider.go
-
-type CompletionRequest struct {
-    System    string
-    User      string
-    MaxTokens int
-    JSONMode  bool
-}
-
-type CompletionResponse struct {
-    Content          string
-    PromptTokens     int
-    CompletionTokens int
-    CostUSD          float64
-    EstimatedCost    bool   // true when cost is estimated, not exact (Gemini CLI)
-}
-
-type Provider interface {
-    Complete(ctx context.Context, req CompletionRequest) (CompletionResponse, error)
-    Name() string
-}
-```
-
-Three implementations, all satisfying the same interface:
-
-```go
-// internal/llm/openrouter.go
-type OpenRouterProvider struct { /* api key, model, http client */ }
-// Returns exact token counts + cost from API response headers.
-
-// internal/llm/gemini_cli.go
-type GeminiCLIProvider struct { BinaryPath string }
-// Pipes prompt to stdin of the `gemini` binary, captures stdout.
-// EstimatedCost: true. Token count estimated as (chars / 4).
-// Note: Gemini CLI is interactive by design — keep prompts fully
-// self-contained so it never pauses waiting for input.
-
-// internal/llm/openai.go  (future-proofing, trivial to add)
-type OpenAIProvider struct { /* api key, model */ }
-```
-
-The `Client` wraps any `Provider` and handles everything else:
-
-```go
-// internal/llm/client.go
-
-type Client struct {
-    provider Provider
-    limiter  *rate.Limiter
-    db       *db.DB
-    logger   *zap.Logger
-}
-
-func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runID string) (CompletionResponse, error) {
-    // 1. Wait for rate limiter token
-    // 2. Call provider (with retry + exponential backoff on 429/5xx)
-    // 3. Log usage to correct table based on resp.EstimatedCost
-    // 4. Return response
-}
-
-func (c *Client) CompleteJSON(ctx context.Context, req CompletionRequest, task, runID string, target any) error {
-    // Complete → json.Unmarshal into target
-    // On failure: retry once with error appended to prompt
-}
-
-func (c *Client) logUsage(resp CompletionResponse, task, runID string) {
-    if resp.EstimatedCost {
-        c.db.InsertGeminiUsage(runID, task, resp.PromptTokens, resp.CompletionTokens)
-    } else {
-        c.db.InsertLLMUsage(runID, task, c.provider.Name(), resp.PromptTokens, resp.CompletionTokens, resp.CostUSD)
-    }
-}
-```
-
-Usage logging is unified through `logUsage` regardless of which provider ran.
-The dashboard Usage tab queries both `llm_usage` (exact) and `gemini_usage`
-(estimated) and renders them together — "OpenRouter: $0.06 / Gemini CLI: ~3 200 tokens estimated."
-
-**Fallback wiring:** the pipeline configures a primary provider (OpenRouter) and
-an optional fallback (Gemini CLI). If OpenRouter returns a hard error after
-retries exhausted, the client transparently retries on the fallback provider
-and logs which one was actually used. Configured in `.env`:
-
-```env
-LLM_PRIMARY=openrouter
-LLM_FALLBACK=gemini_cli          # leave empty to disable fallback
-OPENROUTER_API_KEY=sk-or-...
-OPENROUTER_MODEL=google/gemini-2.5-flash-lite
-GEMINI_CLI_PATH=gemini           # binary name if on PATH, or full path
-```
-
----
-
-## 4. The Four Pipeline Stages
-
-### Stage 1 — Data Collection
-
-**What it does:** Pull company data from external sources into a staging area.
-
-**Sources:**
-- SIRENE Parquet (`data/sirene.parquet`) — already downloaded, read locally
-- `recherche-entreprises.api.gouv.fr` — free API, no auth, returns dirigeants
-- French Tech 5000 CSV (optional one-time import)
-
-**Go implementation:**
-
-```
-internal/collector/
-  sirene.go          — stream Parquet, filter by dept + NAF + headcount
-  recherche.go       — HTTP client for recherche-entreprises API
-  frenchtech.go      — CSV import
-```
-
-SIRENE Parquet reading in Go: use `xitongsys/parquet-go` for pure-Go streaming
-reads. It handles the 2GB file in batches. Alternatively, shell out to DuckDB
-(`duckdb -c "SELECT ... FROM 'sirene.parquet' WHERE ..."`) if the Parquet
-library is painful — DuckDB has a static binary, zero config.
-
-**Output:** Raw company rows written to a `staging_companies` table (not yet
-deduplicated or classified). The stage completes when all sources are exhausted.
-
----
-
-### Stage 2 — Import & Pre-filter
-
-**What it does:** Move staging rows into `companies`, deduplicate by SIREN,
-apply the two-step classification heuristic, discard obvious non-tech.
-
-**Steps:**
-1. Dedup by SIREN (or name+city if no SIREN)
-2. Apply NAF heuristic:
-   - NAF 62xx / 63xx → `company_type = TECH`, pass through
-   - Non-tech NAF + headcount ≥ 100 → `company_type = UNKNOWN`, pass through for LLM check
-   - Non-tech NAF + headcount < 100 → `status = NOT_TECH`, skip
-3. For `UNKNOWN` rows: call LLM classifier (`gpt-oss-120b:free`, free tier) to
-   confirm `TECH_ADJACENT` or `NON_TECH`
-4. Cap `relevance_score` at 7 for `TECH_ADJACENT`
-5. Set `status = NEW` for passing companies
-
-**Output:** `companies` table populated, each row has `company_type` set,
-`NOT_TECH` companies marked and excluded from further stages.
-
----
-
-### Stage 3 — Enrichment Pipeline (the core)
-
-This is the most important stage and the one that was never properly implemented
-in Python. For each company with `status = NEW` and no `primary_contact_id`:
-
-```
-For each company:
-  3a. Discover URLs
-  3b. Fetch + extract content (CascadeFetcher)
-  3c. Extract structured data (LLM)
-  3d. Find contacts (LLM + MCP LinkedIn search)
-  3e. Save results
-```
-
-**3a. Discover URLs**
-
-If the company has no `website` or `linkedin_url`, try to find them:
-- Query `recherche-entreprises.api.gouv.fr/{siren}` — sometimes returns website
-- Construct LinkedIn company search URL and fetch via `CascadeFetcher` (will use MCP since it's a LinkedIn domain)
-- Fallback: DuckDuckGo search via `CascadeFetcher`: `https://duckduckgo.com/?q={name}+{city}+site:linkedin.com`
-
-**3b. Fetch + extract content**
-
-Call `cascadeFetcher.Fetch(ctx, url)` for each URL. The cascade handles
-everything internally — HTTP fast path, MCP fallback, `FORCE_MCP_DOMAINS`,
-local extraction pipeline, cache. The enricher receives a `FetchResult` with
-clean markdown and never touches a fetcher directly.
-
-Cache TTL: 24h for career pages, 7 days for LinkedIn pages, 1h for job board
-listings (V3).
-
-**3c. Extract structured data**
-
-Send fetched markdown to `careers_page.go` parser:
-
-```go
-type RawCompanyPage struct {
-    Name                  string   `json:"name"`
-    Description           string   `json:"description"`
-    City                  string   `json:"city"`
-    Headcount             string   `json:"headcount"`
-    TechStack             []string `json:"tech_stack"`
-    GithubOrg             string   `json:"github_org"`
-    EngineeringBlogURL    string   `json:"engineering_blog_url"`
-    OpenSourceMentioned   bool     `json:"open_source_mentioned"`
-    InfraKeywords         []string `json:"infrastructure_keywords"`
-    CompanyType           string   `json:"company_type"`   // TECH | TECH_ADJACENT | NON_TECH
-    HasInternalTechTeam   bool     `json:"has_internal_tech_team"`
-    TechTeamSignals       []string `json:"tech_team_signals"`
-}
-```
-
-Write back to `companies`. Update `relevance_score`.
-
-**3d. Find contacts**
-
-This is the most valuable and most fragile step. Strategy by company type:
-
-| company_type | Target role | Method |
-|---|---|---|
-| `TECH` | CTO / Engineering Manager / Tech Lead | LinkedIn People tab via MCP |
-| `TECH_ADJACENT` | IT Director / Infrastructure Manager / CIO | LinkedIn People tab via MCP |
-| Either | Technical recruiter (fallback) | LinkedIn People tab via MCP |
-
-MCP flow for LinkedIn contact discovery:
-1. Navigate to company LinkedIn page via MCP
-2. Click "People" tab
-3. Search within company for "CTO" / "infrastructure" / "engineering"
-4. Extract top 3 results: name, role, LinkedIn URL
-5. For each result: check if public email visible on their profile
-6. Pass results to LLM to pick the best contact given company type
-
-Write each found contact to `contacts` table. Set `primary_contact_id` on
-`companies` for the highest-confidence contact.
-
-**3e. Save and advance status**
-
-```
-contact found    → status = TO_CONTACT
-no contact       → status = NO_CONTACT_FOUND (try guess-emails later)
-fetch failed     → status = NEEDS_REVIEW
-3 failures same step → status = FAILED (excluded from future runs)
-```
-
-**Concurrency:** Run enrichment for N companies in parallel (default N=3,
-configurable). Each company gets its own goroutine. Rate limiter is shared
-across all goroutines via `golang.org/x/time/rate`.
-
----
-
-### Stage 4 — Application Generation
-
-For each company with `status = TO_CONTACT` and no existing drafts:
-
-**4a. Career page letter** (if `careers_page_url` is set)
-
-A formal but personal application letter, structured for a career page form or
-email to a generic address. Inputs: company description, tech stack,
-`tech_team_signals`, `profile.json`.
-
-**4b. Cold email per contact**
-
-One email draft per contact in `contacts` table. Angle varies:
-- `TECH` + CTO/tech lead → technically specific, reference their stack
-- `TECH` + HR → impact and fit angle
-- `TECH_ADJACENT` + IT director → internal tooling, adaptability, infra interest
-
-**4c. LinkedIn hook per contact**
-
-≤ 280 chars. Opening line references something specific about their profile or
-company. Generated in the same LLM call as the email to save cost.
-
-All drafts written to `drafts` table with `status = draft`. The dashboard
-shows them for review and one-click send.
-
-**Provider fallback:** if OpenRouter exhausts retries, the client automatically
-retries on the configured fallback provider (Gemini CLI). The calling code in
-`generator/drafts.go` sees a single `client.CompleteJSON()` call — the fallback
-is transparent. Usage is logged to the correct table either way.
-
----
-
-## 5. Metrics & Cost Tracking
-
-### Unified through the LLM client
-
-All usage logging — regardless of provider — flows through `client.logUsage()`
-in `internal/llm/client.go`. The `CompletionResponse.EstimatedCost` bool
-determines which table gets the write:
-
-```
-OpenRouter call  →  resp.EstimatedCost = false  →  INSERT INTO llm_usage    (exact tokens + cost)
-Gemini CLI call  →  resp.EstimatedCost = true   →  INSERT INTO gemini_usage  (estimated tokens)
-```
-
-No separate tracking path. No special-casing in calling code. The provider
-abstraction means the pipeline never knows or cares which backend ran.
-
-### `llm_usage` — exact (OpenRouter)
-
-```sql
-run_id, step, model, prompt_tokens, completion_tokens, cost_usd, ts
-```
-
-OpenRouter returns exact token counts and cost on every response via the
-`usage` field and `x-openrouter-cost` header.
-
-### `gemini_usage` — estimated (Gemini CLI)
-
-Since Gemini CLI returns no token counts, estimate from character count:
-~4 chars per token is a reasonable approximation for French/English mixed text.
-
-```sql
-CREATE TABLE gemini_usage (
-  id               INTEGER PRIMARY KEY AUTOINCREMENT,
-  run_id           TEXT,
-  step             TEXT,
-  prompt_tokens    INTEGER,   -- estimated: prompt_chars / 4
-  completion_tokens INTEGER,  -- estimated: response_chars / 4
-  ts               TEXT NOT NULL DEFAULT (datetime('now'))
-);
-```
-
-The dashboard Usage tab queries both tables and renders them side by side:
-"OpenRouter: $0.06 exact · Gemini CLI: ~3 200 tokens estimated."
-
-### Pipeline run metrics
-
-The existing `run_log` table covers per-step observability. Add a `pipeline_runs`
-summary table for the run-level view:
-
-```sql
-CREATE TABLE pipeline_runs (
-  run_id         TEXT PRIMARY KEY,
-  started_at     TEXT NOT NULL,
-  finished_at    TEXT,
-  status         TEXT NOT NULL DEFAULT 'running'
-                 CHECK(status IN ('running','done','failed','partial')),
-  companies_processed INTEGER DEFAULT 0,
-  contacts_found      INTEGER DEFAULT 0,
-  drafts_generated    INTEGER DEFAULT 0,
-  llm_cost_usd        REAL DEFAULT 0,
-  error_count         INTEGER DEFAULT 0
-);
-```
-
-The dashboard sidebar shows the last N runs with these summary counts. Clicking
-a run shows the per-step `run_log` grid (already implemented in `index.html`).
-
----
-
-## 6. Go Project Structure
+## Current File Structure
 
 ```
 jobhunter/
+  main.go
   cmd/
-    jobhunter/
-      main.go               ← cobra root command + subcommand registration
+    root.go               ← cobra root, config + DB init in PersistentPreRun
+    scan.go               ← scan + score subcommands
+    enrich.go             ← enrich subcommand
+    stats.go              ← stats subcommand
+    bridge.go             ← bridge subcommand (starts local MCP HTTP server)
   internal/
-    tui/
-      pipeline_view.go      ← Bubble Tea model for scan / enrich / generate (live per-company progress)
-      scheduler_view.go     ← Bubble Tea model for schedule (countdown + last run summary)
-      stats_view.go         ← Lip Gloss static render for stats (no event loop needed)
-      setup_view.go         ← Huh multi-step form for first-time setup
-      common.go             ← shared styles (Lip Gloss), colour palette, helper renderers
-    pipeline/
-      engine.go             ← Run, Step, pipeline executor, concurrency
-      step.go               ← StepFn type, result types
-    db/
-      db.go                 ← connection, WAL, migrations, schema_migrations table
-      companies.go          ← upsert, update, get, filter queries
-      contacts.go           ← add, get, set_primary queries
-      runs.go               ← run_log, pipeline_runs, llm_usage, gemini_usage
-      scrape_cache.go       ← get, set, expire, archive
-    llm/
-      provider.go           ← Provider interface, CompletionRequest/Response types
-      client.go             ← Client: rate limiter, retry, backoff, unified usage logging
-      openrouter.go         ← OpenRouterProvider (exact tokens + cost)
-      gemini_cli.go         ← GeminiCLIProvider (exec, estimated tokens)
-      openai.go             ← OpenAIProvider (future, trivial once interface exists)
-    scraper/
-      fetcher.go            ← Fetcher interface + FetchResult type
-      http.go               ← HTTPFetcher (net/http GET)
-      mcp.go                ← MCPFetcher (Blueprint MCP client)
-      cascade.go            ← CascadeFetcher: cache, forceMCP, fallback, orchestration
-      extractor.go          ← Trafilatura → Readability → raw cascade + quality check
-      preprocessors.go      ← site-specific HTML cleanup (LinkedIn, others as needed)
-      markdown.go           ← html-to-markdown wrapper (JohannesKaufmann/html-to-markdown/v2)
-    collector/
-      sirene.go             ← Parquet stream + dept/NAF/headcount filter
-      recherche.go          ← recherche-entreprises.api.gouv.fr client
-      frenchtech.go         ← CSV import (one-time)
-    enricher/
-      enrich.go             ← run_enrichment(companyID): the main glue
-      discover.go           ← URL discovery (website, LinkedIn URL)
-      extract.go            ← RawCompanyPage struct + LLM extraction
-      contacts.go           ← LinkedIn contact discovery via MCP
-      classifier.go         ← llm_score_company, TECH_ADJACENT cap
-    generator/
-      drafts.go             ← career letter, cold email, LinkedIn hook
-      profile.go            ← load profile.json
-    guesser/
-      guesser.go            ← email pattern candidates + SMTP verification
-    api/
-      server.go             ← chi router setup, static file serving
-      jobs.go               ← /api/jobs handlers
-      prospects.go          ← /api/prospects handlers
-      runs.go               ← /api/runs, /api/usage, /api/health handlers
-      drafts.go             ← /api/drafts handlers (V2)
-    scheduler/
-      scheduler.go          ← ticker loop, run at configured times, archive job
+    config/
+      config.go           ← typed Config struct via caarlos0/env
     errors/
-      errors.go             ← JobHunterError types, sentinel errors
-  migrations/
-    001_contacts.sql        ← reuse as-is from Python version
-    002_run_log.sql         ← reuse as-is
-    003_llm_usage.sql       ← reuse as-is
-    004_scrape_cache.sql    ← reuse as-is
-    005_pipeline_runs.sql   ← NEW: pipeline_runs summary table
-    006_gemini_usage.sql    ← NEW: gemini CLI estimated usage
-    007_drafts.sql          ← NEW: drafts table (was V2 in Python plan)
-  static/
-    index.html              ← reuse as-is, zero changes needed
+      errors.go           ← JobHunterError hierarchy (scraping, LLM, enrichment, DB)
+    db/
+      db.go               ← connection, WAL, embedded migration runner
+      companies.go        ← UpsertCompany, UpdateCompany, GetCompany, GetCompaniesForEnrichment
+      contacts.go         ← AddContact, GetContacts
+      runs.go             ← CreatePipelineRun, FinalizePipelineRun, LogStep, InsertLLMUsage, InsertGeminiUsage
+      scrape_cache.go     ← GetCache, SetCache
+      migrations/
+        000_base.sql      ← companies, jobs, activity_log base schema
+        001_contacts.sql  ← contacts table + data migration from legacy columns
+        002_run_log.sql   ← run_log table
+        003_llm_usage.sql ← llm_usage table
+        004_scrape_cache.sql ← scrape_cache table
+        005_pipeline_runs.sql ← pipeline_runs summary table
+        006_gemini_usage.sql  ← gemini_usage estimated table
+        007_drafts.sql    ← drafts table
+    llm/
+      provider.go         ← Provider interface, CompletionRequest, CompletionResponse
+      client.go           ← Client: rate limiter, retry+backoff, unified logUsage, CompleteJSON
+      openrouter.go       ← OpenRouterProvider (exact tokens + cost from headers)
+      gemini_cli.go       ← GeminiCLIProvider (exec -p flag, estimated tokens)
+    pipeline/
+      engine.go           ← Engine, Run, Step, Execute, runStep, run_log writes
+    scraper/
+      fetcher.go          ← Fetcher interface, FetchResult type
+      http.go             ← HTTPFetcher (net/http, browser-like headers)
+      mcp.go              ← MCPFetcher (calls local bridge on /fetch)
+      mcp_server.go       ← MCPServer (local HTTP server wrapping chromedp)
+      cascade.go          ← CascadeFetcher: cache, forceMCP domains, primary→fallback
+      extractor.go        ← Trafilatura → Readability → raw HTML cascade + quality check
+      preprocessors.go    ← preprocess() dispatcher, preprocessLinkedIn()
+      markdown.go         ← ToMarkdown() wrapping html-to-markdown/v2
+    collector/
+      sirene.go           ← DuckDB shell-out, single parquet file, NAF/headcount filter
+      recherche.go        ← recherche-entreprises.api.gouv.fr HTTP client
+    enricher/
+      classifier.go       ← Classifier: ScoreCompany (LLM scoring + DB update)
+      extract.go          ← RawCompanyPage struct, ExtractCompanyInfo (LLM extraction)
+      contacts.go         ← DiscoverLinkedInContactsWithMD (LLM contact selection)
+      discover.go         ← URLDiscoverer: DuckDuckGo search → LinkedIn URL extraction
+      enrich.go           ← Enricher: EnrichCompany (full glue: name fix → URLs → fetch → extract → contacts)
+    tui/
+      common.go           ← Lip Gloss palette, LogMsg type, WaitForLog Cmd
+      stats_view.go       ← RenderStats() — Lip Gloss static table, no event loop
+  static/                 ← not yet created
   data/
-    sirene.parquet          ← already downloaded
-    cache/                  ← archived markdown
-  profile.json              ← your resume as structured data
-  .env
-  Taskfile.yml
+    sirene.parquet        ← SIRENE StockEtablissement (single file, current)
+    cache/                ← archived markdown (future)
   go.mod
   go.sum
+  Taskfile.yml
+  .env
 ```
 
 ---
 
-## 7. Key Go Libraries
+## What Is Built ✅
 
-| Need | Library | Notes |
+**`internal/errors`** — full error hierarchy.
+
+**`internal/db`** — WAL connection, embedded migration runner, all query
+functions. Migrations 000–007 cover all tables.
+
+**`internal/llm`** — `Provider` interface with `OpenRouterProvider` (exact
+tokens + cost) and `GeminiCLIProvider` (headless `-p` flag, estimated tokens).
+`Client` has token-bucket rate limiter, exponential backoff, JSON parse retry,
+unified `logUsage` routing to `llm_usage` or `gemini_usage`.
+
+**`internal/pipeline/engine.go`** — sequential step executor, creates and
+finalizes `pipeline_runs`, writes each step result to `run_log`.
+
+**`internal/scraper`** — complete cascade:
+- `HTTPFetcher` with browser-like headers
+- `MCPFetcher` calling local bridge at `MCP_HOST/fetch`
+- `MCPServer` — local HTTP bridge wrapping `chromedp` for real Chrome sessions,
+  started by `go run . bridge`. This is how LinkedIn and bot-protected pages are
+  fetched with session persistence.
+- `CascadeFetcher` — cache → forceMCP domains → HTTP → MCP fallback
+- `Extractor` — Trafilatura → Readability → raw, quality gated at 500 chars
+- `markdown.go` — html-to-markdown/v2
+
+**`internal/collector`** — `SireneCollector` (DuckDB shell-out, single Parquet)
+and `RechercheClient` (free French company search API).
+
+**`internal/enricher`** — full end-to-end glue: `ScoreCompany`, `ExtractCompanyInfo`,
+`DiscoverLinkedInContactsWithMD`, `DiscoverURLs`, `EnrichCompany`.
+
+**`internal/tui`** — Lip Gloss palette and static stats view.
+
+**`cmd/`** — `scan`, `score`, `enrich`, `stats`, `bridge` all functional.
+
+---
+
+## Known Gaps & Bugs to Fix First
+
+### Gap 1 — SIRENE name resolution (`Company X` rows) 🔴
+
+**Root cause:** `sirene.go` falls back to `"Company " + siren` when both
+`denominationUsuelleEtablissement` and `enseigne` fields are blank. This affects
+a large portion of the DB and breaks enrichment (LLM searches for the wrong name).
+
+**Fix — requires three changes:**
+
+1. Download `StockUniteLegale` Parquet (~200MB, same data.gouv.fr dataset):
+```yaml
+download-sirene-ul:
+  cmds:
+    - curl -L -o data/sirene_unites_legales.parquet <url>
+```
+
+2. Update `sirene.go` DuckDB query to JOIN both files:
+```sql
+SELECT
+    e.siren, e.siret,
+    COALESCE(
+        NULLIF(TRIM(e.enseigne1Etablissement), ''),
+        NULLIF(TRIM(e.denominationUsuelleEtablissement), ''),
+        NULLIF(TRIM(ul.denominationUniteLegale), ''),
+        NULLIF(TRIM(ul.sigleUniteLegale), '')
+    ) AS name_raw,
+    ul.denominationUniteLegale AS legal_name,
+    ul.sigleUniteLegale        AS acronym,
+    ...
+FROM 'data/sirene_etablissements.parquet' e
+JOIN 'data/sirene_unites_legales.parquet' ul ON e.siren = ul.siren
+WHERE e.etatAdministratifEtablissement = 'A'
+  AND ul.etatAdministratifUniteLegale  = 'A'
+```
+
+3. Add `internal/collector/names.go`:
+```go
+// Strip "SAS", "SARL", "SASU", "SA", "SNC", "SCI", "EURL", "SELARL" suffixes
+func cleanCompanyName(raw string) string
+
+// lowercase + remove accents + collapse whitespace — used for dedup and fuzzy match
+func normalizeName(s string) string
+```
+
+4. Write `internal/db/migrations/008_company_names.sql`:
+```sql
+ALTER TABLE companies ADD COLUMN legal_name      TEXT;
+ALTER TABLE companies ADD COLUMN acronym         TEXT;
+ALTER TABLE companies ADD COLUMN name_normalized TEXT;
+CREATE INDEX IF NOT EXISTS idx_companies_name_norm ON companies(name_normalized);
+```
+
+5. Add `LegalName`, `Acronym`, `NameNormalized` to `db.Company` and update
+`UpsertCompany`. Add `SIRENE_UL_PARQUET_PATH` to `config.go`.
+
+---
+
+### Gap 2 — `scrape_cache` method CHECK is wrong 🔴
+
+`004_scrape_cache.sql` has `CHECK(method IN ('jina','mcp','manual','cache'))`.
+The codebase uses `'http'`. Cache writes silently fail.
+
+**Fix — write `009_fix_scrape_cache_method.sql`:**
+```sql
+CREATE TABLE scrape_cache_new (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  url         TEXT NOT NULL UNIQUE,
+  method      TEXT NOT NULL CHECK(method IN ('http','mcp','manual','cache')),
+  content_md  TEXT NOT NULL,
+  quality     REAL NOT NULL DEFAULT 1.0,
+  fetched_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  expires_at  TEXT NOT NULL
+);
+INSERT INTO scrape_cache_new SELECT * FROM scrape_cache;
+DROP TABLE scrape_cache;
+ALTER TABLE scrape_cache_new RENAME TO scrape_cache;
+CREATE INDEX IF NOT EXISTS idx_scrape_cache_url        ON scrape_cache(url);
+CREATE INDEX IF NOT EXISTS idx_scrape_cache_expires_at ON scrape_cache(expires_at);
+```
+
+---
+
+### Gap 3 — Invalid company statuses 🔴
+
+`enrich.go` writes `status = 'ENRICHED'` and the plan requires `'FAILED'` and
+`'NEEDS_REVIEW'`, but the CHECK constraint in `000_base.sql` only allows
+`NEW, ENRICHING, TO_CONTACT, CONTACTED, REPLIED, NOT_TECH, PASS`.
+
+**Fix — write `010_company_status.sql`** to drop the constraint and enforce
+valid statuses at the Go layer. Valid set going forward:
+`NEW`, `ENRICHING`, `ENRICHED`, `TO_CONTACT`, `NO_CONTACT_FOUND`, `CONTACTED`,
+`REPLIED`, `NOT_TECH`, `NEEDS_REVIEW`, `FAILED`, `PASS`.
+
+```sql
+-- Recreate without CHECK to allow the full status set
+CREATE TABLE companies_new AS SELECT * FROM companies;
+DROP TABLE companies;
+ALTER TABLE companies_new RENAME TO companies;
+CREATE INDEX IF NOT EXISTS idx_companies_status ON companies(status);
+CREATE INDEX IF NOT EXISTS idx_companies_city   ON companies(city);
+CREATE INDEX IF NOT EXISTS idx_companies_score  ON companies(relevance_score DESC);
+```
+
+---
+
+### Gap 4 — `enrich.go` final status logic 🟡
+
+When enrichment runs but finds no contact, the final status is set to
+`'ENRICHED'` (only if still `'NEW'`). It should be `'NO_CONTACT_FOUND'`:
+
+```go
+// Replace the final block in EnrichCompany:
+if comp.Status == "NEW" {
+    _ = e.db.UpdateCompany(comp.ID, map[string]interface{}{
+        "status": "NO_CONTACT_FOUND",
+    })
+}
+```
+
+---
+
+### Gap 5 — Dead code in `contacts.go` 🟢
+
+`DiscoverURL()` in `internal/enricher/contacts.go` returns
+`fmt.Errorf("not implemented")`. Fetching is correctly done via `Enricher.fetcher`
+in `enrich.go`. Remove this stub to avoid confusion.
+
+---
+
+## What Remains to Build
+
+### Step 15 — `internal/tui/pipeline_view.go`
+
+Bubble Tea model for `scan` and `enrich` commands. Replace raw `fmt.Printf`
+progress output with a live full-screen view.
+
+Layout: header (run ID + elapsed time), scrollable list of company rows
+(`⠋ scoring…` → `✓ TECH (7)` / `✗ error`), footer with aggregate counts.
+
+Wire via `LogMsg` channel already in `common.go`:
+```go
+logCh := make(chan tui.LogMsg, 100)
+// enricher pushes to logCh
+// cmd/enrich.go: tea.NewProgram(tui.NewPipelineModel(logCh)).Run()
+```
+
+The `scan` and `enrich` commands need updating to launch the model.
+
+---
+
+### Step 16 — `internal/api/` + `static/index.html` + `cmd/dashboard.go`
+
+Chi router serving the web dashboard.
+
+```
+internal/api/
+  server.go      ← chi setup, embed static/index.html, /api/events SSE
+  prospects.go   ← GET /api/prospects, GET /api/prospects/{id}, PATCH /api/prospects/{id}
+                   GET /api/prospects/{id}/contacts
+  runs.go        ← GET /api/runs, GET /api/runs/{id}
+                   GET /api/usage/today, GET /api/usage/history
+                   GET /api/health
+  drafts.go      ← GET /api/drafts, PATCH /api/drafts/{id}, POST /api/drafts/{id}/send
+```
+
+`static/index.html` — port the existing Python dashboard design. The HTML/JS
+is already fully designed; it just needs to be served by Go. All API endpoints
+it calls are defined above.
+
+`cmd/dashboard.go` — starts the chi server on `:8080`.
+
+---
+
+### Step 17 — `internal/generator/` + `cmd/generate.go`
+
+Draft generation for companies with `status = TO_CONTACT`.
+
+```
+internal/generator/
+  profile.go   ← LoadProfile() reads profile.json
+  drafts.go    ← GenerateDrafts(companyID, runID): writes career_page + cold_email + linkedin_hook to drafts table
+```
+
+One LLM call per contact generating both email and LinkedIn hook together to
+save tokens. Angle matrix:
+
+| company_type | contact role | angle |
 |---|---|---|
-| SQLite | `modernc.org/sqlite` | Pure Go, no CGO, works everywhere. Prefer over `mattn/go-sqlite3` |
-| HTTP router | `github.com/go-chi/chi/v5` | Lightweight, idiomatic, no magic |
-| HTTP client | stdlib `net/http` | HTTPFetcher + all other outbound calls |
-| Rate limiter | `golang.org/x/time/rate` | Token bucket, exactly what you need |
-| HTML extraction | `github.com/markusmobius/go-trafilatura` | Primary content extractor — better recall on arbitrary pages |
-| HTML extraction | `github.com/go-shiori/go-readability` | Fallback extractor — more conservative, reliable on article/blog pages |
-| HTML → Markdown | `github.com/JohannesKaufmann/html-to-markdown/v2` | Converts clean extracted HTML to markdown; handles tables well (important for LinkedIn) |
-| Parquet | `github.com/xitongsys/parquet-go` | Pure Go streaming reads for SIRENE |
-| JSON | stdlib `encoding/json` | Sufficient; add `github.com/tidwall/gjson` for quick field extraction |
-| Config | `github.com/caarlos0/env/v11` | Struct tags on a single `Config` struct, validated at startup — cleaner than scattered `os.Getenv` calls |
-| TUI framework | `github.com/charmbracelet/bubbletea` | Elm-architecture TUI loop — pipeline views, live progress, scheduler screen |
-| TUI components | `github.com/charmbracelet/bubbles` | Spinner, progress bar, table, viewport, text input — use these before writing custom components |
-| TUI styling | `github.com/charmbracelet/lipgloss` | Colors, borders, layout — replaces inline ANSI codes everywhere |
-| TUI forms | `github.com/charmbracelet/huh` | Multi-step setup wizard (`jobhunter setup`) — purpose-built for this use case |
-| CLI subcommands | `github.com/spf13/cobra` | Needed now that each subcommand has its own Bubble Tea model; Cobra dispatches to the right one |
-| Logging | `go.uber.org/zap` | Structured fields + levels; `zap.String("run_id", id)` makes pipeline logs greppable. Use `zap.NewDevelopment()` locally, `zap.NewProduction()` (JSON) elsewhere |
-| DNS (guesser) | stdlib `net` | MX lookup is built in |
-| SMTP (guesser + send) | stdlib `net/smtp` | Built in |
-| Fuzzy match (V3) | `github.com/lithammer/fuzzysearch` | For company name matching against `companies` table |
+| TECH | CTO / tech lead | technically specific, reference their stack |
+| TECH | HR | impact and team fit |
+| TECH_ADJACENT | IT director / CIO | internal tooling, adaptability, infra |
+
+`cmd/generate.go` — batch generation with configurable `--batch` flag.
 
 ---
 
-## 7. The TUI — Charm Stack
+### Step 18 — `internal/guesser/` + `cmd/guess-emails.go`
 
-### Library breakdown
+Email pattern guessing for `status = NO_CONTACT_FOUND` companies.
 
-Charm's ecosystem is a coherent stack, not a single library. Each piece has a
-distinct role:
+```
+internal/guesser/
+  guesser.go  ← GenerateCandidates(first, last, domain), VerifyEmailSMTP(), EnrichMissingEmails()
+```
 
-| Library | Role | Used for |
+Uses stdlib `net` for MX lookups, `net/smtp` for RCPT TO verification.
+Treat results as `'guessed'` confidence, not verified.
+
+---
+
+### Step 19 — `internal/scheduler/` + `internal/tui/scheduler_view.go` + `cmd/schedule.go`
+
+Scheduled daily runs and nightly cache archival.
+
+```
+internal/scheduler/
+  scheduler.go  ← ticker loop at configured times, run full pipeline, archive scrape_cache rows >30 days
+```
+
+`tui/scheduler_view.go` — Bubble Tea screen showing next run countdown + last
+run summary + live log viewport.
+
+Nightly archive job: move `scrape_cache` rows older than 30 days to
+`data/cache/{YYYY-MM}/{domain}/{hash}.md` and delete from SQLite.
+
+---
+
+### Step 20 — `internal/tui/setup_view.go` + `cmd/setup.go`
+
+Huh multi-step wizard for first-time configuration. Walks through: name →
+school → skills → start date → SMTP credentials → API keys. Writes `.env` on
+completion.
+
+---
+
+## Database Migrations — Full List
+
+| File | Status | Contents |
 |---|---|---|
-| **Bubble Tea** | TUI event loop (Elm architecture) | Any view that updates in real time |
-| **Bubbles** | Pre-built components | Spinner, progress bar, table, viewport, text input |
-| **Lip Gloss** | Styling (colours, borders, layout) | All terminal styling — replaces ANSI codes |
-| **Huh** | Form / wizard library | `setup` command only |
-| **Cobra** | Subcommand routing | Dispatches `scan`, `enrich`, etc. to the right Bubble Tea model |
+| `000_base.sql` | ✅ | companies, jobs, activity_log |
+| `001_contacts.sql` | ✅ | contacts table, legacy data migration |
+| `002_run_log.sql` | ✅ | run_log table |
+| `003_llm_usage.sql` | ✅ | llm_usage (exact) |
+| `004_scrape_cache.sql` | ✅ applied, ⚠️ wrong CHECK | scrape_cache — fix in 009 |
+| `005_pipeline_runs.sql` | ✅ | pipeline_runs summary |
+| `006_gemini_usage.sql` | ✅ | gemini_usage (estimated) |
+| `007_drafts.sql` | ✅ | drafts table |
+| `008_company_names.sql` | ❌ write first | legal_name, acronym, name_normalized |
+| `009_fix_scrape_cache_method.sql` | ❌ write first | fix 'jina'→'http' CHECK |
+| `010_company_status.sql` | ❌ write first | drop status CHECK, allow full set |
 
-### Command → TUI mapping
-
-Each subcommand gets the right treatment — not everything needs a full event loop:
-
-**`jobhunter scan [city] [depts]`** → Bubble Tea app
-Full-screen view. Header: run ID + elapsed time. Body: scrollable list of
-companies being processed, each row cycling through `⠋ fetching` → `✓ saved` /
-`✗ skipped`. Footer: running totals (found / new / skipped). Quits automatically
-when the pipeline engine signals completion.
-
-**`jobhunter enrich [batch]`** → Bubble Tea app
-Same structure as scan. Each company row shows its current step:
-`⠋ fetching` → `⠋ extracting` → `⠋ finding contacts` → `✓ contact found` /
-`~ needs review`. Concurrency is visible — up to 3 rows animating simultaneously.
-
-**`jobhunter generate`** → Bubble Tea app
-Simpler: one row per company, spinner while LLM generates, then `✓ 3 drafts` or
-`✗ error`. Progress bar at the top showing X/total done.
-
-**`jobhunter stats`** → Lip Gloss only, no event loop
-Render a styled table to stdout and exit. No `tea.NewProgram` needed — just
-`lipgloss.NewStyle()` and `fmt.Println`. Done in ~30 lines.
-
-**`jobhunter setup`** → Huh form
-Multi-step wizard. Name → school → skills → start date → SMTP → API keys.
-Each field validates on submit. Writes `.env` on completion. This is exactly
-what Huh was designed for.
-
-**`jobhunter schedule`** → Bubble Tea app
-Persistent full-screen view. Shows: next scheduled run with live countdown,
-last run summary (companies processed, contacts found, cost), a log viewport
-scrolling recent activity. `q` to quit.
-
-**`jobhunter dashboard`** → no TUI
-Just print a Lip Gloss–styled banner (`http://localhost:8000`) and block on the
-HTTP server. The dashboard is the web UI — no terminal UI needed here.
-
-### The zap + Bubble Tea coexistence problem
-
-Zap writes to stdout/stderr. Bubble Tea owns the terminal. If both write
-simultaneously, the TUI corrupts. The fix:
-
-During a Bubble Tea session, configure zap to write to a file only:
-
-```go
-// Before tea.NewProgram(model):
-fileCore := zapcore.NewCore(
-    zapcore.NewJSONEncoder(zap.NewProductionEncoderConfig()),
-    zapcore.AddSync(logFile),
-    zap.DebugLevel,
-)
-logger = zap.New(fileCore)
-```
-
-Surface log lines inside the TUI by sending them as Bubble Tea messages through
-a channel. The pipeline engine pushes `LogMsg{Level, Text}` onto a channel; the
-Bubble Tea model receives them via `tea.Cmd` and appends them to a `viewport`
-component. The user sees live log output inside the TUI without stdout conflicts.
-
-```go
-// internal/tui/common.go
-type LogMsg struct {
-    Level string
-    Text  string
-}
-
-// Pipeline engine pushes to this channel
-// Bubble Tea model polls it via a tea.Cmd
-func waitForLog(ch <-chan LogMsg) tea.Cmd {
-    return func() tea.Msg {
-        return <-ch
-    }
-}
-```
-
-This pattern — a channel bridge between background goroutines and the Bubble Tea
-loop — is the standard way to drive TUI updates from async work.
-
-### Lip Gloss colour palette
-
-Define once in `internal/tui/common.go`, use everywhere:
-
-```go
-var (
-    accent   = lipgloss.Color("#4af0a0")   // matches index.html --accent
-    accent2  = lipgloss.Color("#4ab8f0")
-    warn     = lipgloss.Color("#f0c44a")
-    danger   = lipgloss.Color("#f04a6e")
-    dim      = lipgloss.Color("#4a5268")
-    surface  = lipgloss.Color("#13161b")
-
-    tagTech     = lipgloss.NewStyle().Foreground(accent).Border(lipgloss.RoundedBorder())
-    tagAdjacent = lipgloss.NewStyle().Foreground(accent2).Border(lipgloss.RoundedBorder())
-    bold        = lipgloss.NewStyle().Bold(true)
-    dimStyle    = lipgloss.NewStyle().Foreground(dim)
-)
-```
-
-Keeping the palette consistent with `index.html`'s CSS variables means the
-terminal and web UIs feel like the same product.
+Migrations 008, 009, 010 are blockers for clean operation. Write them before
+continuing with steps 15+.
 
 ---
 
-## 8. The Pipeline Engine in Detail
+## Config Reference (`.env`)
 
-This replaces Dagster. Here is how it works:
+```env
+DB_PATH=data/jobs.db
 
-```go
-// engine.go
+# SIRENE (add second line after gap 1 is fixed)
+SIRENE_PARQUET_PATH=data/sirene.parquet
+SIRENE_UL_PARQUET_PATH=data/sirene_unites_legales.parquet
 
-type Run struct {
-    ID        string
-    StartedAt time.Time
-    Steps     []StepResult
-    db        *DB
-}
+# LLM
+LLM_PRIMARY=openrouter
+LLM_FALLBACK=gemini_cli
+OPENROUTER_API_KEY=sk-or-...
+OPENROUTER_MODEL=google/gemini-2.5-flash-lite
+OPENROUTER_RPM=60
+GEMINI_CLI_PATH=gemini
 
-type StepResult struct {
-    Name       string
-    Status     string // ok | error | skipped | needs_review
-    Error      error
-    DurationMs int64
-}
+# Scraping
+MCP_HOST=http://localhost:3000
+FORCE_MCP_DOMAINS=linkedin.com
 
-func (e *Engine) Execute(ctx context.Context, steps []Step) (*Run, error) {
-    run := e.newRun()           // INSERT INTO pipeline_runs
-    for _, step := range steps {
-        result := e.runStep(ctx, run, step)
-        run.Steps = append(run.Steps, result)
-        if result.Status == "error" && step.StopOnError {
-            break
-        }
-    }
-    e.finalizeRun(run)          // UPDATE pipeline_runs SET status, finished_at
-    return run, nil
-}
-
-func (e *Engine) runStep(ctx context.Context, run *Run, step Step) StepResult {
-    start := time.Now()
-    e.logStep(run.ID, step.Name, "running", nil, 0)  // INSERT run_log
-
-    ctx, cancel := context.WithTimeout(ctx, step.Timeout)
-    defer cancel()
-
-    err := step.Fn(ctx, run)
-    duration := time.Since(start).Milliseconds()
-
-    status := "ok"
-    if err != nil { status = "error" }
-
-    e.logStep(run.ID, step.Name, status, err, duration)  // UPDATE run_log
-    return StepResult{Name: step.Name, Status: status, Error: err, DurationMs: duration}
-}
+# Email (Step 18+)
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USER=you@gmail.com
+SMTP_PASS=your_app_password
+YOUR_EMAIL=you@example.com
 ```
-
-**For the enrichment stage**, where you run the same step for N companies in
-parallel:
-
-```go
-func enrichAllCompanies(ctx context.Context, run *Run) error {
-    companies, _ := run.db.GetCompaniesForEnrichment()
-
-    sem := make(chan struct{}, 3) // max 3 concurrent
-    var wg sync.WaitGroup
-    var mu sync.Mutex
-    var errs []error
-
-    for _, company := range companies {
-        wg.Add(1)
-        go func(c Company) {
-            defer wg.Done()
-            sem <- struct{}{}
-            defer func() { <-sem }()
-
-            err := enrichSingleCompany(ctx, run, c)
-            if err != nil {
-                mu.Lock()
-                errs = append(errs, err)
-                mu.Unlock()
-            }
-        }(company)
-    }
-
-    wg.Wait()
-    // partial failure is fine — individual errors are in run_log
-    return nil
-}
-```
-
-This gives you: parallel execution, per-company error isolation (one failure
-doesn't stop the others), full observability in `run_log`, and resumability
-(re-running the pipeline skips companies that already have `status != NEW`).
 
 ---
 
-## 9. Build Order
+## Key Libraries (go.mod)
 
-Do these in strict order. Each step produces something runnable or testable
-before moving on.
-
-| Step | Package | What | Testable when done |
-|---|---|---|---|
-| 1 | `internal/errors` | Error types | Import compiles |
-| 2 | `internal/db` | Connection, migrations, all query functions | `go run . stats` shows empty DB |
-| 3 | `internal/llm` | `Provider` interface + `Client` (rate limiter, retry, usage logging) + `OpenRouterProvider` | `go run . test-llm` calls API and logs to `llm_usage` |
-| 3b | `internal/llm/gemini_cli.go` | `GeminiCLIProvider` — same interface, estimated tokens | Fallback works transparently |
-| 4 | `internal/tui/common.go` | Lip Gloss palette + `LogMsg` channel bridge | Styles compile, colours match web UI |
-| 5 | `internal/tui/stats_view.go` | Lip Gloss stats table (no event loop) | `go run . stats` renders styled output |
-| 6 | `internal/collector/sirene.go` | DuckDB shell-out + NAF/headcount filter + import to `companies` | `go run . scan Poitiers 86` populates DB with real data |
-| 7 | `internal/enricher/classifier.go` | LLM scoring + TECH / TECH_ADJACENT / NON_TECH cap | Companies get types and scores against real SIRENE rows |
-| 8 | `internal/pipeline/engine.go` | Run + Step executor + run_log writes | `go run . run` creates a run in DB |
-| 9 | `internal/scraper/http.go` + `mcp.go` | `HTTPFetcher` and `MCPFetcher` implementations | Fetch a raw URL with each, see HTML |
-| 10 | `internal/scraper/extractor.go` + `preprocessors.go` + `markdown.go` | Trafilatura → Readability → raw cascade + html-to-markdown | Feed raw HTML, get clean markdown out |
-| 11 | `internal/scraper/cascade.go` | `CascadeFetcher`: cache, `FORCE_MCP_DOMAINS`, fallback, full flow | `cascadeFetcher.Fetch(url)` returns markdown for any URL |
-| 12 | `internal/enricher/extract.go` | RawCompanyPage + LLM extraction | Parse a fetched page for a real company from DB |
-| 13 | `internal/enricher/contacts.go` | LinkedIn contact discovery via MCP | Find a contact for a real company |
-| 14 | `internal/enricher/enrich.go` | **The glue** — full enrichment flow end-to-end | Enrichment runs against real SIRENE-sourced companies |
-| 15 | `internal/tui/pipeline_view.go` | Bubble Tea pipeline model (spinner list + log viewport) | `go run . enrich` shows live progress |
-| 16 | `internal/api` | chi router + all existing handlers | Dashboard loads, runs tab works |
-| **Core done** | | | |
-| 17 | `internal/generator/drafts.go` | Career letter + email + LinkedIn hook | Drafts appear in dashboard |
-| 18 | `internal/guesser` | Email pattern + SMTP verify | `go run . guess-emails` works |
-| 19 | `internal/scheduler` + `tui/scheduler_view.go` | Ticker loop + archive job + schedule screen | `go run . schedule` shows countdown UI |
-| 20 | `internal/tui/setup_view.go` | Huh multi-step form | `go run . setup` walks through config wizard |
-| **V1 complete** | | | |
-
-Steps 1–5 are infrastructure and TUI foundation. Steps 6–7 seed the DB with
-real data immediately — every subsequent step runs against actual companies, not
-fixtures. Steps 8–14 build the enrichment pipeline on top of that real data.
-Steps 15–20 complete the product.
-
----
-
-## 10. What to Reuse From the Python Version
-
-| File | Action | What to take |
+| Need | Library | In use |
 |---|---|---|
-| `migrations/*.sql` | Copy as-is | All four files, unchanged |
-| `static/index.html` | Copy as-is | Served by Go's `http.FileServer` |
-| `Taskfile.yml` | Adapt | Replace `python jobhunter.py X` with `go run . X` |
-| `llm.py` | Read as reference | Retry logic, backoff math, `complete_json` pattern |
-| `scraper/fetcher.py` | Read as reference | Cache TTL config, quality check thresholds, NEEDS_REVIEW logic |
-| `scraper/parsers/careers_page.py` | Read as reference | System prompt, `RawCompanyPage` fields → Go struct |
-| `scraper/pipeline.py` | Read as reference | Step wrapper pattern → Go function wrapper |
-| `prospector.py` | Read as reference | `_headcount_label` map, SIRENE column names, enrichment prompt |
-| `errors.py` | Read as reference | Error type names → Go error types |
-| Everything else | Ignore | Rewrite fresh — it's simpler in Go |
-
-The `.env` key names stay identical. `profile.json` stays identical.
-The SQL migration files are language-agnostic and are a direct copy.
+| SQLite | `modernc.org/sqlite` | ✅ |
+| Config | `github.com/caarlos0/env/v11` | ✅ |
+| .env | `github.com/joho/godotenv` | ✅ |
+| Logging | `go.uber.org/zap` | ✅ |
+| CLI | `github.com/spf13/cobra` | ✅ |
+| Rate limiter | `golang.org/x/time/rate` | ✅ |
+| UUID | `github.com/google/uuid` | ✅ |
+| HTML extraction | `github.com/markusmobius/go-trafilatura` | ✅ |
+| HTML extraction | `github.com/go-shiori/go-readability` | ✅ |
+| HTML → Markdown | `github.com/JohannesKaufmann/html-to-markdown/v2` | ✅ |
+| Browser automation | `github.com/chromedp/chromedp` | ✅ |
+| MCP protocol | `github.com/metoro-io/mcp-golang` | ✅ |
+| TUI | `github.com/charmbracelet/bubbletea` | ✅ |
+| TUI components | `github.com/charmbracelet/bubbles` | ✅ |
+| TUI styling | `github.com/charmbracelet/lipgloss` | ✅ |
+| TUI forms | `github.com/charmbracelet/huh` | in go.mod, step 20 |
+| HTTP router | `github.com/go-chi/chi/v5` | ❌ add for step 16 |
+| Fuzzy match | `github.com/lithammer/fuzzysearch` | ❌ add for V3 |
 
 ---
 
-## 11. The One Decision to Make Before Starting
+## V3 — Job Board Scraping (Future)
 
-**Parquet reading for SIRENE.**
+Add job board scrapers after V1 is complete. Each source is a plugin:
 
-Option A: `xitongsys/parquet-go`
-- Pure Go, no external binary
-- API is verbose but works
-- Streaming batch reads handle the 2GB file fine
-- ~2–3h to get right the first time
-
-Option B: Shell out to DuckDB
-```go
-cmd := exec.Command("duckdb", "-csv", "-c",
-    `SELECT siren, denominationUsuelleEtablissement, ...
-     FROM 'data/sirene.parquet'
-     WHERE codePostalEtablissement LIKE '86%'
-     AND etatAdministratifEtablissement = 'A'`)
-out, _ := cmd.Output()
-// parse CSV
 ```
-- DuckDB binary is a single 30MB static download
-- SQL is much more readable than the Parquet-go API
-- Zero library friction, done in 30 minutes
-- Adds a binary dependency
+internal/scraper/parsers/
+  wttj.go        ← Welcome to the Jungle
+  indeed.go      ← Indeed France
+  lesjeudis.go   ← Lesjeudis
+```
 
-**Recommendation:** Option B (DuckDB shell-out) to unblock yourself quickly.
-You can always replace it with Option A later. The SIRENE scan is not
-performance-critical — it runs once per city, not in the hot path.
+LinkedIn Jobs via MCP (session required). All others: HTTP primary, MCP fallback.
+
+Company linking: fuzzy match scraped company names against `companies.name_normalized`
+using `lithammer/fuzzysearch` at threshold 85. Match increments `relevance_score`
+(capped at 10). Dashboard "hot leads" filter: contact found + recent matched job.

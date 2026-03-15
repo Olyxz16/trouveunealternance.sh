@@ -144,29 +144,6 @@ def run_migrations():
                 sql = m_file.read_text()
                 try:
                     conn.executescript(sql)
-                    
-                    # Handle specific ALTER TABLE statements for 001_contacts.sql
-                    if m_file.name == "001_contacts.sql":
-                        try:
-                            conn.execute("ALTER TABLE companies ADD COLUMN primary_contact_id INTEGER REFERENCES contacts(id)")
-                        except sqlite3.OperationalError: pass # Already exists
-                        try:
-                            conn.execute("ALTER TABLE companies ADD COLUMN company_type TEXT DEFAULT 'UNKNOWN' CHECK(company_type IN ('TECH', 'TECH_ADJACENT', 'NON_TECH', 'UNKNOWN'))")
-                        except sqlite3.OperationalError: pass
-                        try:
-                            conn.execute("ALTER TABLE companies ADD COLUMN has_internal_tech_team INTEGER DEFAULT NULL")
-                        except sqlite3.OperationalError: pass
-                        try:
-                            conn.execute("ALTER TABLE companies ADD COLUMN tech_team_signals TEXT")
-                        except sqlite3.OperationalError: pass
-                        
-                        # Update primary_contact_id for existing ones
-                        conn.execute("""
-                            UPDATE companies SET primary_contact_id = (
-                                SELECT id FROM contacts WHERE company_id = companies.id LIMIT 1
-                            )
-                        """)
-
                     conn.execute("INSERT INTO schema_migrations (name) VALUES (?)", (m_file.name,))
                     conn.commit()
                 except Exception as e:
@@ -301,7 +278,8 @@ COMPANY_COLS = [
     "tech_stack", "description",
     "contact_name", "contact_role", "contact_email", "contact_linkedin",
     "careers_page_url", "source", "status", "relevance_score", "notes", "date_found",
-    "company_type", "has_internal_tech_team", "tech_team_signals", "primary_contact_id"
+    "company_type", "has_internal_tech_team", "tech_team_signals", "primary_contact_id",
+    "legal_name", "acronym", "name_normalized"
 ]
 
 

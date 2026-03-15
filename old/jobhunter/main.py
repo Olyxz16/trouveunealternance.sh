@@ -35,9 +35,10 @@ HELP = """
   [bold white]── Company prospecting ──[/bold white]
     [cyan]jobhunter.py scan [city] [depts][/cyan]  Scan SIRENE for local tech companies
     [cyan]jobhunter.py target [batch][/cyan]      Score + Enrich best prospects in batch
-    [cyan]jobhunter.py download-sirene[/cyan]      Download ~2GB SIRENE data from data.gouv.fr
-    [cyan]jobhunter.py enrich-prospects[/cyan]     Enrich prospects via Gemini + LinkedIn
-  [cyan]jobhunter.py score-prospects[/cyan]      LLM-score unscored companies
+    [cyan]jobhunter.py download-sirene[/cyan]      Download SIRENE Etablissements Parquet
+    [cyan]jobhunter.py download-sirene-ul[/cyan]   Download SIRENE Unites Legales Parquet
+    [cyan]jobhunter.py enrich-prospects [batch][/cyan] Enrich prospects via Gemini + LinkedIn
+  [cyan]jobhunter.py score-prospects[/cyan]      LLM-score unscored companies in DB
   [cyan]jobhunter.py frenchtech [city][/cyan]    Generate French Tech scrape prompt
 
   [bold white]── Infrastructure ──[/bold white]
@@ -158,12 +159,16 @@ async def main():
         await cmd_frenchtech(city)
 
     elif cmd == "score-prospects":
-        from jobhunter.prospector import cmd_score
-        await cmd_score()
+        from jobhunter.prospector import cmd_score_prospects
+        await cmd_score_prospects()
 
     elif cmd == "download-sirene":
         from jobhunter.prospector import download_sirene
         await download_sirene()
+
+    elif cmd == "download-sirene-ul":
+        from jobhunter.prospector import download_sirene_ul
+        await download_sirene_ul()
 
     elif cmd == "prompts":
         from jobhunter.scraper import generate_prompts_only

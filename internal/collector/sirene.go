@@ -14,7 +14,7 @@ import (
 	"strings"
 )
 
-const SIRENE_PARQUET_URL = "https://www.data.gouv.fr/fr/datasets/r/a29c1297-1f92-4e2a-8f6b-8c902ce96c5f"
+const SIRENE_PARQUET_URL = "https://object.files.data.gouv.fr/data-pipeline-open/siren/stock/StockEtablissement_utf8.parquet"
 
 var NAF_LABELS = map[string]string{
 	"6201Z": "Programmation informatique",
@@ -29,30 +29,48 @@ var NAF_LABELS = map[string]string{
 var TECH_NAF_PREFIXES = []string{"62", "63"}
 
 type SireneCollector struct {
-	db       *db.DB
-	parquet  string
+	db        *db.DB
+	parquet   string
+	ulParquet string
 }
 
-func NewSireneCollector(database *db.DB, parquetPath string) *SireneCollector {
+func NewSireneCollector(database *db.DB, parquetPath, ulParquetPath string) *SireneCollector {
 	return &SireneCollector{
-		db:      database,
-		parquet: parquetPath,
+		db:        database,
+		parquet:   parquetPath,
+		ulParquet: ulParquetPath,
 	}
 }
 
 func (s *SireneCollector) EnsureData(ctx context.Context) error {
-	if _, err := os.Stat(s.parquet); err == nil {
-		return nil
+	// Check etablissements
+	if _, err := os.Stat(s.parquet); err != nil {
+		log.Printf("SIRENE etablissements parquet missing. Downloading...")
+		if err := s.download(ctx, SIRENE_PARQUET_URL, s.parquet); err != nil {
+			return err
+		}
 	}
 
-	log.Printf("SIRENE parquet missing. Downloading from %s...", SIRENE_PARQUET_URL)
-	
-	dir := filepath.Dir(s.parquet)
+	// Check unites_legales
+	if _, err := os.Stat(s.ulParquet); err != nil {
+		log.Printf("SIRENE unites_legales parquet missing. Downloading from %s...", SIRENE_UL_URL)
+		if err := s.download(ctx, SIRENE_UL_URL, s.ulParquet); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+const SIRENE_UL_URL = "https://object.files.data.gouv.fr/data-pipeline-open/siren/stock/StockUniteLegale_utf8.parquet"
+
+func (s *SireneCollector) download(ctx context.Context, url, dest string) error {
+	dir := filepath.Dir(dest)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", SIRENE_PARQUET_URL, nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return err
 	}
@@ -64,10 +82,10 @@ func (s *SireneCollector) EnsureData(ctx context.Context) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to download SIRENE: status %d", resp.StatusCode)
+		return fmt.Errorf("failed to download from %s: status %d", url, resp.StatusCode)
 	}
 
-	out, err := os.Create(s.parquet)
+	out, err := os.Create(dest)
 	if err != nil {
 		return err
 	}
@@ -84,23 +102,28 @@ func (s *SireneCollector) Scan(ctx context.Context, departments []string, minHea
 
 	deptList := "'" + strings.Join(departments, "','") + "'"
 	
-	// DuckDB query to filter SIRENE parquet
-	// trancheEffectifsEtablissement codes: https://www.sirene.fr/static-resources/doc/v_sommaire_syntaxe_9-9.pdf
-	// 00: 0, 01: 1-2, 02: 3-5, 03: 6-9, 11: 10-19, 12: 20-49, 21: 50-99, 22: 100-199, etc.
-	
 	query := fmt.Sprintf(`
 		SELECT 
-			siren, 
-			siret, 
-			COALESCE(denominationUsuelleEtablissement, enseigne1Etablissement, enseigne2Etablissement, enseigne3Etablissement, 'Company ' || siren) as name,
-			activitePrincipaleEtablissement as naf_code,
-			trancheEffectifsEtablissement as headcount_code,
-			codePostalEtablissement as zip,
-			libelleCommuneEtablissement as city
-		FROM read_parquet('%s')
-		WHERE etatAdministratifEtablissement = 'A'
-		AND SUBSTR(codePostalEtablissement, 1, 2) IN (%s)
-	`, s.parquet, deptList)
+			e.siren, 
+			e.siret, 
+			COALESCE(
+				NULLIF(TRIM(e.enseigne1Etablissement), ''),
+				NULLIF(TRIM(e.denominationUsuelleEtablissement), ''),
+				NULLIF(TRIM(ul.denominationUniteLegale), ''),
+				NULLIF(TRIM(ul.sigleUniteLegale), '')
+			) AS name_raw,
+			ul.denominationUniteLegale as legal_name,
+			ul.sigleUniteLegale as acronym,
+			e.activitePrincipaleEtablissement as naf_code,
+			e.trancheEffectifsEtablissement as headcount_code,
+			e.codePostalEtablissement as zip,
+			e.libelleCommuneEtablissement as city
+		FROM read_parquet('%s') e
+		JOIN read_parquet('%s') ul ON e.siren = ul.siren
+		WHERE e.etatAdministratifEtablissement = 'A'
+		AND ul.etatAdministratifUniteLegale = 'A'
+		AND SUBSTR(e.codePostalEtablissement, 1, 2) IN (%s)
+	`, s.parquet, s.ulParquet, deptList)
 
 	cmd := exec.CommandContext(ctx, "duckdb", "-csv", "-c", query)
 	stdout, err := cmd.StdoutPipe()
@@ -113,11 +136,10 @@ func (s *SireneCollector) Scan(ctx context.Context, departments []string, minHea
 	}
 
 	reader := csv.NewReader(stdout)
-	header, err := reader.Read() // skip header
+	_, err = reader.Read() // skip header
 	if err != nil {
 		return 0, 0, err
 	}
-	_ = header
 
 	totalFound := 0
 	newAdded := 0
@@ -134,14 +156,19 @@ func (s *SireneCollector) Scan(ctx context.Context, departments []string, minHea
 
 		siren := record[0]
 		siret := record[1]
-		name := record[2]
-		naf := record[3]
-		hcCode := record[4]
-		zip := record[5]
-		city := record[6]
+		nameRaw := record[2]
+		legalName := record[3]
+		acronym := record[4]
+		naf := record[5]
+		hcCode := record[6]
+		zip := record[7]
+		city := record[8]
 
 		hcVal := getMinHeadcount(hcCode)
-		if hcVal < minHeadcount && hcCode != "" && hcCode != "NN" && hcCode != "00" {
+		if hcVal < minHeadcount {
+			continue
+		}
+		if hcCode == "NN" || hcCode == "00" || hcCode == "" {
 			continue
 		}
 
@@ -162,14 +189,16 @@ func (s *SireneCollector) Scan(ctx context.Context, departments []string, minHea
 		} else if hcVal >= 100 {
 			companyType = "UNKNOWN"
 		} else {
-			// Skip small non-tech
 			continue
 		}
 
 		totalFound++
 
 		c := &db.Company{
-			Name:           name,
+			Name:           cleanCompanyName(nameRaw),
+			LegalName:      db.ToNullString(legalName),
+			Acronym:        db.ToNullString(acronym),
+			NameNormalized: db.ToNullString(normalizeName(nameRaw)),
 			Siren:          db.ToNullString(siren),
 			Siret:          db.ToNullString(siret),
 			NAFCode:        db.ToNullString(naf),
@@ -184,7 +213,7 @@ func (s *SireneCollector) Scan(ctx context.Context, departments []string, minHea
 
 		_, isNew, err := s.db.UpsertCompany(c)
 		if err != nil {
-			log.Printf("Failed to upsert company %s: %v", name, err)
+			log.Printf("Failed to upsert company %s: %v", c.Name, err)
 			continue
 		}
 		if isNew {

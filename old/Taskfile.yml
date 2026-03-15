@@ -4,6 +4,7 @@ vars:
   PYTHON: python3
   CITY: Poitiers
   DEPTS: 86
+  BATCH: 10
 
 tasks:
   setup:
@@ -28,16 +29,6 @@ tasks:
     cmds:
       - "{{.PYTHON}} jobhunter.py enrich"
 
-  emails:
-    desc: Stage 3 — Approve and send cold emails
-    cmds:
-      - "{{.PYTHON}} jobhunter.py emails"
-
-  guess-emails:
-    desc: Attempt to guess missing contact emails for jobs
-    cmds:
-      - "{{.PYTHON}} jobhunter.py guess-emails"
-
   # ── PROSPECTING ─────────────────────────────────────────────────────────────
 
   scan:
@@ -48,17 +39,17 @@ tasks:
   target:
     desc: Score + Enrich best prospects in batch (use BATCH=10)
     cmds:
-      - "{{.PYTHON}} jobhunter.py target {{.BATCH | default 10}}"
+      - "{{.PYTHON}} jobhunter.py target {{.BATCH}}"
 
   download-sirene:
-    desc: Download ~2GB SIRENE data from data.gouv.fr (run once)
+    desc: Download SIRENE Etablissements Parquet
     cmds:
       - "{{.PYTHON}} jobhunter.py download-sirene"
 
-  enrich-prospects:
-    desc: Enrich prospects via Gemini + LinkedIn
+  download-sirene-ul:
+    desc: Download SIRENE Unites Legales Parquet
     cmds:
-      - "{{.PYTHON}} jobhunter.py enrich-prospects"
+      - "{{.PYTHON}} jobhunter.py download-sirene-ul"
 
   score-prospects:
     desc: LLM-score unscored companies
@@ -72,22 +63,13 @@ tasks:
     cmds:
       - "{{.PYTHON}} jobhunter.py dashboard"
 
-  schedule:
-    desc: Start the scheduler (daily runs at 8:30 + 18:00)
-    cmds:
-      - "{{.PYTHON}} jobhunter.py schedule"
-
-  once:
-    desc: Run full pipeline (scrape + enrich) once now
-    cmds:
-      - "{{.PYTHON}} jobhunter.py once"
-
   stats:
     desc: Show database statistics
     cmds:
       - "{{.PYTHON}} jobhunter.py stats"
 
-  prompts:
-    desc: Generate prompt files without running Gemini CLI
+  wipe:
+    desc: Wipe database (CLEAN START)
     cmds:
-      - "{{.PYTHON}} jobhunter.py prompts"
+      - rm -f data/jobs.db
+      - "{{.PYTHON}} jobhunter/db.py" # Re-init schema

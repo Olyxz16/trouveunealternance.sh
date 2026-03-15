@@ -23,6 +23,20 @@ tasks:
     cmds:
       - go run . enrich --batch {{.BATCH}}
 
+  # ── DATA ────────────────────────────────────────────────────────────────────
+
+  download-sirene:
+    desc: Download SIRENE Etablissements Parquet
+    cmds:
+      - mkdir -p data
+      - curl -L -o data/sirene_etablissements.parquet https://object.files.data.gouv.fr/data-pipeline-open/siren/stock/StockEtablissement_utf8.parquet
+
+  download-sirene-ul:
+    desc: Download SIRENE Unites Legales Parquet
+    cmds:
+      - mkdir -p data
+      - curl -L -o data/sirene_unites_legales.parquet https://object.files.data.gouv.fr/data-pipeline-open/siren/stock/StockUniteLegale_utf8.parquet
+
   # ── INFRASTRUCTURE ──────────────────────────────────────────────────────────
 
   stats:
@@ -40,9 +54,16 @@ tasks:
     cmds:
       - go run . bridge
 
-  # ── FULL PIPELINE ───────────────────────────────────────────────────────────
+  # ── UTILS ───────────────────────────────────────────────────────────────────
 
-  run:
-    desc: Run a full scan + score pipeline
+  wipe:
+    desc: Wipe the entire database (delete file)
     cmds:
-      - go run . scan --dept {{.DEPTS}}
+      - rm -f data/jobs.db data/jobs.db-shm data/jobs.db-wal
+      - echo "Database file deleted."
+
+  reset:
+    desc: Wipe database and start a fresh scan
+    cmds:
+      - task: wipe
+      - task: scan

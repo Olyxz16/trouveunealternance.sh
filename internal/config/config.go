@@ -9,7 +9,8 @@ import (
 
 type Config struct {
 	DBPath             string `env:"DB_PATH" envDefault:"data/jobs.db"`
-	SireneParquetPath  string `env:"SIRENE_PARQUET_PATH" envDefault:"data/sirene.parquet"`
+	SireneParquetPath  string `env:"SIRENE_PARQUET_PATH" envDefault:"data/sirene_etablissements.parquet"`
+	SireneULParquetPath string `env:"SIRENE_UL_PARQUET_PATH" envDefault:"data/sirene_unites_legales.parquet"`
 	OpenRouterAPIKey   string `env:"OPENROUTER_API_KEY"`
 	OpenRouterModel    string `env:"OPENROUTER_MODEL" envDefault:"google/gemini-2.5-flash-lite"`
 	OpenRouterRPM      int    `env:"OPENROUTER_RPM" envDefault:"60"`

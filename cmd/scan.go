@@ -34,7 +34,7 @@ var scanCmd = &cobra.Command{
 		runID := uuid.New().String()
 		engine := pipeline.NewEngine(database)
 
-		sirene := collector.NewSireneCollector(database, cfg.SireneParquetPath)
+		sirene := collector.NewSireneCollector(database, cfg.SireneParquetPath, cfg.SireneULParquetPath)
 		
 		steps := []pipeline.Step{
 			{
