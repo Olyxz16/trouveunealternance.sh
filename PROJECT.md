@@ -67,9 +67,12 @@ The project aims to build a high-accuracy, stable, and cost-effective system to:
 
 ### Recently Implemented
 - **Robust Scraper:** Multi-stage cascade fetcher with caching and browser-based search fallback (DuckDuckGo).
-- **Integrated TUI:** Modern progress monitoring for scan, score, and enrich pipelines.
-- **LLM Usage Tracking:** Real-time monitoring of token usage and API costs in SQLite.
-- **URL Discovery:** AI-driven URL discovery using Gemini Search Grounding when available.
+- **Agentic Scrolling:** Browser fetcher now supports scrolling to trigger lazy-loading (essential for LinkedIn).
+- **LLM-Powered Search:** LLM-based URL extraction from search results for higher accuracy.
+- **LinkedIn Search Fallback:** When the "People" tab fails, the system performs an external search to find key contacts.
+- **Improved Timeouts:** Increased LLM and browser timeouts (up to 10 mins) to handle complex search grounding and prevent "context deadline exceeded" errors.
+- **Debug Features:** Added `--no-tui` and `--id` flags to the `enrich` command for transparent logging and targeted testing.
+- **Resilient LLM Client:** Added per-attempt timeouts and better error handling for OpenRouter and Gemini providers.
 
 ### Next Steps (Priority)
 - [ ] **Enrichment Engine:** Further improve lead discovery quality using more advanced prompt engineering.

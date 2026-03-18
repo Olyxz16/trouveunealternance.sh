@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"io"
 	"jobhunter/internal/db"
 	"jobhunter/internal/enricher"
 	"jobhunter/internal/llm"
@@ -20,10 +21,16 @@ import (
 	"go.uber.org/zap/zapcore"
 )
 
-var batchSize int
+var (
+	batchSize int
+	companyID int
+	noTUI     bool
+)
 
 func init() {
 	enrichCmd.Flags().IntVarP(&batchSize, "batch", "b", 10, "Number of companies to enrich")
+	enrichCmd.Flags().IntVarP(&companyID, "id", "i", 0, "Specific company ID to enrich")
+	enrichCmd.Flags().BoolVar(&noTUI, "no-tui", false, "Disable TUI and log to stdout")
 	rootCmd.AddCommand(enrichCmd)
 }
 
@@ -36,31 +43,47 @@ var enrichCmd = &cobra.Command{
 		defer cancel()
 
 		// 1. Redirect logs to file immediately to keep terminal clean
+		var logWriter io.Writer
 		logFile, err := os.OpenFile("jobhunter.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: Failed to open log file: %v\n", err)
 			os.Exit(1)
 		}
 		defer logFile.Close()
-		log.SetOutput(logFile)
+		
+		if noTUI {
+			logWriter = io.MultiWriter(os.Stdout, logFile)
+		} else {
+			logWriter = logFile
+		}
+		log.SetOutput(logWriter)
 
 		// 2. Pre-flight: Get companies
-		companies, err := database.GetCompaniesForEnrichment()
-		if err != nil {
-			log.Printf("Error: Failed to query database: %v", err)
-			fmt.Fprintf(os.Stderr, "Error: Failed to query database: %v\n", err)
-			os.Exit(1)
-		}
-
 		var targetCompanies []db.Company
-		for _, c := range companies {
-			if c.Status == "NEW" && c.RelevanceScore > 0 {
-				targetCompanies = append(targetCompanies, c)
+		if companyID != 0 {
+			c, err := database.GetCompany(companyID)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: Failed to get company %d: %v\n", companyID, err)
+				os.Exit(1)
 			}
-		}
+			targetCompanies = append(targetCompanies, *c)
+		} else {
+			companies, err := database.GetCompaniesForEnrichment()
+			if err != nil {
+				log.Printf("Error: Failed to query database: %v", err)
+				fmt.Fprintf(os.Stderr, "Error: Failed to query database: %v\n", err)
+				os.Exit(1)
+			}
 
-		if len(targetCompanies) > batchSize {
-			targetCompanies = targetCompanies[:batchSize]
+			for _, c := range companies {
+				if c.Status == "NEW" && c.RelevanceScore > 0 {
+					targetCompanies = append(targetCompanies, c)
+				}
+			}
+
+			if len(targetCompanies) > batchSize {
+				targetCompanies = targetCompanies[:batchSize]
+			}
 		}
 
 		if len(targetCompanies) == 0 {
@@ -83,14 +106,16 @@ var enrichCmd = &cobra.Command{
 		m := tui.NewPipelineModel(runID, logCh)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 
-		go func() {
+		worker := func() {
 			// Small delay to ensure TUI has started and received WindowSizeMsg
-			time.Sleep(100 * time.Millisecond)
-			p.Send(tui.TotalUpdateMsg(len(targetCompanies)))
-			logCh <- tui.LogMsg{Level: "INFO", Text: "Initializing enrichment pipeline..."}
+			if !noTUI {
+				time.Sleep(100 * time.Millisecond)
+				p.Send(tui.TotalUpdateMsg(len(targetCompanies)))
+			}
+			log.Printf("INFO: Initializing enrichment pipeline...")
 
 			// Setup LLM
-			logCh <- tui.LogMsg{Level: "INFO", Text: "Connecting to LLM providers..."}
+			log.Printf("INFO: Connecting to LLM providers...")
 			var primary, fallback llm.Provider
 			if cfg.LLMPrimary == "openrouter" {
 				primary = llm.NewOpenRouterProvider(cfg.OpenRouterAPIKey, cfg.OpenRouterModel)
@@ -110,13 +135,13 @@ var enrichCmd = &cobra.Command{
 			var geminiAPI *llm.GeminiAPIProvider
 			if cfg.GeminiAPIKey != "" {
 				geminiAPI = llm.NewGeminiAPIProvider(cfg.GeminiAPIKey, cfg.GeminiAPIModel)
-				logCh <- tui.LogMsg{Level: "INFO", Text: "Gemini API search grounding enabled for URL discovery"}
+				log.Printf("INFO: Gemini API search grounding enabled for URL discovery")
 			} else {
-				logCh <- tui.LogMsg{Level: "WARN", Text: "GEMINI_API_KEY not set — falling back to DuckDuckGo for discovery"}
+				log.Printf("WARN: GEMINI_API_KEY not set — falling back to DuckDuckGo for discovery")
 			}
 
 			// Setup Scraper
-			logCh <- tui.LogMsg{Level: "INFO", Text: "Launching browser instance..."}
+			log.Printf("INFO: Launching browser instance...")
 			httpFetcher := scraper.NewHTTPFetcher()
 			browserFetcher, err := scraper.NewBrowserFetcher(
 				cfg.BrowserCookiesPath,
@@ -126,10 +151,10 @@ var enrichCmd = &cobra.Command{
 				logger,
 			)
 			if err != nil {
-				logCh <- tui.LogMsg{Level: "WARN", Text: fmt.Sprintf("Browser failed: %v. Using HTTP only.", err)}
+				log.Printf("WARN: Browser failed: %v. Using HTTP only.", err)
 			} else {
 				defer browserFetcher.Close()
-				logCh <- tui.LogMsg{Level: "INFO", Text: "Browser ready."}
+				log.Printf("INFO: Browser ready.")
 			}
 
 			forceDomains := strings.Split(cfg.ForceBrowserDomains, ",")
@@ -137,48 +162,63 @@ var enrichCmd = &cobra.Command{
 			cascade := scraper.NewCascadeFetcher(httpFetcher, browserFetcher, forceDomains, database, extractor, logger)
 			enr := enricher.NewEnricher(database, cascade, classifier, geminiAPI)
 
-			p.Send(tui.ReadyMsg{})
-			logCh <- tui.LogMsg{Level: "INFO", Text: fmt.Sprintf("Enriching %d companies...", len(targetCompanies))}
+			if !noTUI {
+				p.Send(tui.ReadyMsg{})
+			}
+			log.Printf("INFO: Enriching %d companies...", len(targetCompanies))
 
 			// Start Processing
 			for _, c := range targetCompanies {
-				p.Send(tui.CompanyUpdateMsg{
-					ID:     c.ID,
-					Name:   c.Name,
-					Step:   "Researching",
-					Status: tui.StatusRunning,
-				})
+				if !noTUI {
+					p.Send(tui.CompanyUpdateMsg{
+						ID:     c.ID,
+						Name:   c.Name,
+						Step:   "Researching",
+						Status: tui.StatusRunning,
+					})
+				}
 
 				err := enr.EnrichCompany(ctx, c.ID, runID)
 				
 				if err != nil {
-					p.Send(tui.CompanyUpdateMsg{
-						ID:      c.ID,
-						Name:    c.Name,
-						Step:    "Failed",
-						Status:  tui.StatusError,
-						Message: err.Error(),
-					})
-					logCh <- tui.LogMsg{Level: "ERROR", Text: fmt.Sprintf("Failed to enrich %s: %v", c.Name, err)}
+					if !noTUI {
+						p.Send(tui.CompanyUpdateMsg{
+							ID:      c.ID,
+							Name:    c.Name,
+							Step:    "Failed",
+							Status:  tui.StatusError,
+							Message: err.Error(),
+						})
+					}
+					log.Printf("ERROR: Failed to enrich %s: %v", c.Name, err)
 				} else {
-					p.Send(tui.CompanyUpdateMsg{
-						ID:     c.ID,
-						Name:   c.Name,
-						Step:   "Done",
-						Status: tui.StatusDone,
-					})
-					logCh <- tui.LogMsg{Level: "INFO", Text: fmt.Sprintf("Successfully enriched %s", c.Name)}
+					if !noTUI {
+						p.Send(tui.CompanyUpdateMsg{
+							ID:     c.ID,
+							Name:   c.Name,
+							Step:   "Done",
+							Status: tui.StatusDone,
+						})
+					}
+					log.Printf("INFO: Successfully enriched %s", c.Name)
 				}
 				
 				time.Sleep(1 * time.Second)
 			}
-			p.Send(tui.PipelineDoneMsg{})
-		}()
+			if !noTUI {
+				p.Send(tui.PipelineDoneMsg{})
+			}
+		}
 
-		// Start TUI (blocks until exit)
-		if _, err := p.Run(); err != nil {
-			log.SetOutput(os.Stderr) // restore for final error
-			log.Fatalf("TUI Error: %v", err)
+		if noTUI {
+			worker()
+		} else {
+			go worker()
+			// Start TUI (blocks until exit)
+			if _, err := p.Run(); err != nil {
+				log.SetOutput(os.Stderr) // restore for final error
+				log.Fatalf("TUI Error: %v", err)
+			}
 		}
 	},
 }

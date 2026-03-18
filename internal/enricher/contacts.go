@@ -33,12 +33,17 @@ type IndividualProfileData struct {
 	TechStack   []string `json:"tech_stack"`   // technologies mentioned on their profile
 }
 
-const PeopleExtractionPrompt = `You are extracting a list of individual employees from a LinkedIn People tab or employee listing.
+const PeopleExtractionPrompt = `You are extracting a list of individual employees from a LinkedIn People tab or from search engine results.
 
 Return ALL relevant contacts found (up to 5 people). Do not return just one.
 
+CRITICAL:
+- ONLY return people explicitly mentioned in the provided content.
+- NEVER hallucinate or invent names (e.g., do NOT return "John Doe", "Jane Smith", "Mike Smith" if they are not in the text).
+- If no real people are found, return an empty list.
+
 STRICT RULES:
-- linkedin_url MUST be a personal LinkedIn profile URL starting with https://www.linkedin.com/in/ — never a relative path like /in/... — NEVER a /company/ URL
+- linkedin_url MUST be a full, absolute personal LinkedIn profile URL starting with https://www.linkedin.com/in/ — never a relative path like /in/... — NEVER a /company/ URL
 - email: only include if a personal work email is explicitly visible on the page — do NOT include generic company emails (contact@, info@, careers@, jobs@) — leave empty if unsure
 - name and role are required — skip entries where you cannot determine both
 - Focus on: CTO, VP Engineering, Engineering Manager, Tech Lead, DevOps Engineer, Infrastructure Manager, IT Director, Technical Recruiter

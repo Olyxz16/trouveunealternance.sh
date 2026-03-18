@@ -75,7 +75,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 	// 1. Discover URLs if missing
 	linkedin := comp.LinkedinURL.String
 	if website == "" || linkedin == "" {
-		disc := NewURLDiscoverer(e.fetcher, e.geminiAPI)
+		disc := NewURLDiscoverer(e.fetcher, e.geminiAPI, e.classifier)
 		w, l, err := disc.DiscoverURLs(ctx, *comp)
 		if err == nil {
 			if website == "" {
@@ -165,20 +165,41 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 	}
 
 	peopleURL := strings.TrimSuffix(linkedin, "/") + "/people/"
-	log.Printf("DEBUG [%s]: Fetching people from %s", comp.Name, peopleURL)
-	peopleRes, err := e.fetcher.Fetch(ctx, peopleURL)
+	log.Printf("DEBUG [%s]: Fetching people from %s (with scroll)", comp.Name, peopleURL)
+	peopleRes, err := e.fetcher.ScrollAndFetch(ctx, peopleURL, 3)
 	if err != nil {
 		log.Printf("DEBUG [%s]: People fetch failed: %v", comp.Name, err)
+		// Fallback to website if LinkedIn failed
+		if website != "" {
+			log.Printf("DEBUG [%s]: Retrying contact search on website %s", comp.Name, website)
+			peopleRes, err = e.fetcher.Fetch(ctx, website)
+		}
+	}
+
+	if err != nil || peopleRes.Quality < 0.2 {
+		log.Printf("DEBUG [%s]: No reliable contact page found (err: %v)", comp.Name, err)
 		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "NO_CONTACT_FOUND"})
 		return nil
 	}
-	log.Printf("DEBUG [%s]: People page fetched: quality %.2f, length %d", comp.Name, peopleRes.Quality, len(peopleRes.ContentMD))
+	log.Printf("DEBUG [%s]: Contact page fetched: quality %.2f, length %d via %s", comp.Name, peopleRes.Quality, len(peopleRes.ContentMD), peopleRes.Method)
 
 	people, err := e.classifier.ExtractPeopleFromPage(ctx, peopleRes.ContentMD, runID)
+	log.Printf("DEBUG [%s]: ExtractPeopleFromPage result: count=%d, err=%v", comp.Name, len(people.Contacts), err)
+	
+	// Filter out obviously fake/hallucinated contacts if they came from a low-quality source
+	// (Placeholder names like "John Doe" or generic ones)
+	
 	if err != nil || len(people.Contacts) == 0 {
-		log.Printf("DEBUG [%s]: No contacts found on LinkedIn (err: %v, count: %d)", comp.Name, err, len(people.Contacts))
-		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "NO_CONTACT_FOUND"})
-		return nil
+		log.Printf("DEBUG [%s]: No contacts found on page, trying external search", comp.Name)
+		disc := NewURLDiscoverer(e.fetcher, e.geminiAPI, e.classifier)
+		extContacts, err := disc.SearchPeopleOnLinkedIn(ctx, *comp, []string{"CTO", "Directeur Technique", "DevOps", "Recrutement", "RH", "Engineering Manager"})
+		if err == nil && len(extContacts) > 0 {
+			people.Contacts = extContacts
+		} else {
+			log.Printf("DEBUG [%s]: No contacts found even with external search", comp.Name)
+			_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "NO_CONTACT_FOUND"})
+			return nil
+		}
 	}
 
 	log.Printf("Found %d candidates for %s", len(people.Contacts), comp.Name)

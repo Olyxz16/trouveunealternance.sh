@@ -58,3 +58,7 @@ I set the BATCH variable to 20. Even though you will have a few hundred companie
 The project description can be found in the PROJECT.md file.
 
 When working, use your own branch, and commit along the way.
+
+Be careful, certain commands don't finish automatically. For example, most CLI's command require you to press 'q' at the end. Don't run commands blindly or you will probably get stuck at some point.
+
+Use a timeout to make sure you can exit the program.

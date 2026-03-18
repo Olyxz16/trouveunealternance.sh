@@ -40,7 +40,11 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runI
 			return CompletionResponse{}, err
 		}
 
-		resp, err := c.provider.Complete(ctx, req)
+		// Per-attempt timeout to avoid hanging
+		attemptCtx, cancel := context.WithTimeout(ctx, 300*time.Second)
+		resp, err := c.provider.Complete(attemptCtx, req)
+		cancel()
+
 		if err == nil {
 			c.logUsage(resp, task, runID)
 			return resp, nil
@@ -60,9 +64,13 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runI
 
 		if shouldRetry && i < maxRetries {
 			log.Printf("Primary LLM %s failed (attempt %d/%d), retrying in %v: %v", c.provider.Name(), i+1, maxRetries+1, backoff, err)
-			time.Sleep(backoff)
-			backoff *= 2
-			continue
+			select {
+			case <-ctx.Done():
+				return CompletionResponse{}, ctx.Err()
+			case <-time.After(backoff):
+				backoff *= 2
+				continue
+			}
 		}
 		break
 	}
@@ -70,7 +78,11 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runI
 	// 2. Try Fallback if primary failed
 	if c.fallback != nil {
 		log.Printf("Primary LLM provider failed, trying fallback %s: %v", c.fallback.Name(), lastErr)
-		resp, err := c.fallback.Complete(ctx, req)
+		// Per-attempt timeout for fallback too
+		attemptCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+		resp, err := c.fallback.Complete(attemptCtx, req)
+		cancel()
+
 		if err == nil {
 			c.logUsage(resp, task, runID)
 			return resp, nil

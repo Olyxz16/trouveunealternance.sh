@@ -34,7 +34,9 @@ Scoring (0-10):
 A company classified as TECH or TECH_ADJACENT should NEVER have a 0 score.
 If you see NAF 62xx or 63xx, it is TECH by definition.
 
-IMPORTANT: Even if the Description is empty, you MUST provide an assessment based on the Company Name and NAF code. Do not ask for more information. Use your internal knowledge about the company if the name is recognizable.
+IMPORTANT: Even if the Description is empty, you MUST provide an assessment based on the Company Name and NAF code. Use your internal knowledge about the company if the name is recognizable.
+
+Provide your reasoning in the 'reasoning' field, explaining why you gave that score and type.
 
 You MUST return a JSON object with EXACTLY these fields:
 - relevance_score: int (0-10)
@@ -67,6 +69,27 @@ STRICT RULES:
 - Skip directory sites like Pappers, Societe.com, Verif, etc.
 - If not found, return empty strings.
 `
+
+const PeopleSearchExtractionPrompt = `You are extracting a list of individual professionals and their LinkedIn profile URLs from search engine results.
+
+Return ALL relevant contacts found (up to 5 people).
+
+STRICT RULES:
+- linkedin_url MUST be a full, absolute personal LinkedIn profile URL (https://www.linkedin.com/in/...)
+- name and role are required.
+- Focus on: CTO, Engineering Manager, HR, Recruitment, CEO, Founder.
+
+Return a JSON object with a single field "contacts" containing the list.`
+
+func (c *Classifier) ExtractPeopleFromSearchResults(ctx context.Context, markdown string, runID string) (PeoplePageData, error) {
+	var result PeoplePageData
+	req := llm.CompletionRequest{
+		System: PeopleSearchExtractionPrompt,
+		User:   fmt.Sprintf("Search results (Markdown):\n\n%s", markdown),
+	}
+	err := c.llm.CompleteJSON(ctx, req, "extract_people_from_search", runID, &result)
+	return result, err
+}
 
 func (c *Classifier) ExtractURLsFromSearch(ctx context.Context, searchResultMD string, runID string) (string, string, error) {
 	type searchResult struct {

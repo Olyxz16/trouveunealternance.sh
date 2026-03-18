@@ -103,18 +103,39 @@ func (f *BrowserFetcher) Name() string { return "browser" }
 func (f *BrowserFetcher) Fetch(ctx context.Context, url string) (string, error) {
 	var html string
 
-	err := chromedp.Run(f.ctx,
+	f.logger.Info("browser fetching", zap.String("url", url))
+
+	// Deriving a new context from f.ctx while respecting the timeout/cancellation of ctx
+	runCtx, cancel := chromedp.NewContext(f.ctx)
+	defer cancel()
+
+	// Apply timeout from provided ctx if it has one, or default 60s
+	deadline, ok := ctx.Deadline()
+	var timeoutCtx context.Context
+	var timeoutCancel context.CancelFunc
+	if ok {
+		timeoutCtx, timeoutCancel = context.WithDeadline(runCtx, deadline)
+	} else {
+		timeoutCtx, timeoutCancel = context.WithTimeout(runCtx, 60*time.Second)
+	}
+	defer timeoutCancel()
+
+	err := chromedp.Run(timeoutCtx,
 		chromedp.Navigate(url),
-		// Wait for body to be present — basic JS rendering complete
 		chromedp.WaitReady("body", chromedp.ByQuery),
-		// Small pause for dynamic content (React, Vue etc.)
-		chromedp.Sleep(1500*time.Millisecond),
-		// Get full rendered HTML
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			// Optional cookie clicker
+			_ = chromedp.Click(`button[data-control-name="ga-cookie.accept_all"]`, chromedp.ByQuery).Do(ctx)
+			return nil
+		}),
+		chromedp.Sleep(2000*time.Millisecond),
 		chromedp.OuterHTML("html", &html, chromedp.ByQuery),
 	)
 	if err != nil {
 		return "", fmt.Errorf("browser fetch failed for %s: %w", url, err)
 	}
+
+	f.logger.Info("browser fetch success", zap.String("url", url), zap.Int("html_len", len(html)))
 
 	// Save cookies after each successful fetch to keep session fresh
 	if err := f.saveCookies(); err != nil {
@@ -122,6 +143,33 @@ func (f *BrowserFetcher) Fetch(ctx context.Context, url string) (string, error) 
 	}
 
 	return html, nil
+}
+
+// Scroll scrolls the page down to trigger lazy loading.
+func (f *BrowserFetcher) Scroll(ctx context.Context, times int) error {
+	runCtx, cancel := chromedp.NewContext(f.ctx)
+	defer cancel()
+
+	deadline, ok := ctx.Deadline()
+	var timeoutCtx context.Context
+	var timeoutCancel context.CancelFunc
+	if ok {
+		timeoutCtx, timeoutCancel = context.WithDeadline(runCtx, deadline)
+	} else {
+		timeoutCtx, timeoutCancel = context.WithTimeout(runCtx, 60*time.Second)
+	}
+	defer timeoutCancel()
+
+	for i := 0; i < times; i++ {
+		err := chromedp.Run(timeoutCtx,
+			chromedp.Evaluate(`window.scrollTo(0, document.body.scrollHeight)`, nil),
+			chromedp.Sleep(1000*time.Millisecond),
+		)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Close shuts down the browser gracefully and saves cookies one final time.

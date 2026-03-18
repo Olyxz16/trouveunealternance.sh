@@ -340,3 +340,434 @@
 2026-03-16T16:35:54.096+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=CNED+SITE+DE+POITIERS+CHASSENEUIL-DU-POITOU+linkedin+company"}
 2026/03/16 16:35:54 DEBUG [CNED SITE DE POITIERS]: DDG discovery result: website=, linkedin=
 2026/03/16 16:35:54 DEBUG [CNED SITE DE POITIERS]: No target URL (LinkedIn or Website) found after discovery
+2026-03-18T11:27:28.716+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 11:27:50 DEBUG [CENTRE HOSPITALIER HENRI LABORIT]: Gemini discovery success: website=https://www.ch-laborit.fr, linkedin=
+2026/03/18 11:27:51 DEBUG [CENTRE HOSPITALIER HENRI LABORIT]: Fetched https://www.ch-laborit.fr: quality 0.70 via http
+2026/03/18 11:27:51 DEBUG [CENTRE HOSPITALIER HENRI LABORIT]: Extracting company info from content (length: 689)
+2026/03/18 11:27:57 DEBUG [CENTRE HOSPITALIER HENRI LABORIT]: Company info extracted: Type=NON_TECH, TechStack=[]
+2026/03/18 11:27:57 DEBUG [CENTRE HOSPITALIER HENRI LABORIT]: No LinkedIn URL available, cannot search for individuals
+2026-03-18T11:39:55.125+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 11:40:19 DEBUG [CENTRE HOSPITALIER HENRI LABORIT]: Gemini discovery success: website=https://www.ch-laborit.fr, linkedin=
+2026-03-18T11:40:19.230+0100	INFO	cache hit	{"url": "https://www.ch-laborit.fr"}
+2026/03/18 11:40:19 DEBUG [CENTRE HOSPITALIER HENRI LABORIT]: Fetched https://www.ch-laborit.fr: quality 0.70 via cache
+2026/03/18 11:40:19 DEBUG [CENTRE HOSPITALIER HENRI LABORIT]: Extracting company info from content (length: 689)
+2026/03/18 11:41:19 Primary LLM provider failed, trying fallback gemini_cli: context deadline exceeded (Client.Timeout or context cancellation while reading body)
+2026/03/18 11:44:19 DEBUG [CENTRE HOSPITALIER HENRI LABORIT]: Company info extracted: Type=NON_TECH, TechStack=[]
+2026/03/18 11:44:19 DEBUG [CENTRE HOSPITALIER HENRI LABORIT]: No LinkedIn URL available, cannot search for individuals
+2026-03-18T11:57:07.162+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 11:57:24 DEBUG [CAISSE REG CRED AGRIC MUT TOURAIN POITOU]: Gemini discovery success: website=https://www.credit-agricole.fr/ca-tourainepoitou, linkedin=
+2026/03/18 11:57:24 DEBUG [CAISSE REG CRED AGRIC MUT TOURAIN POITOU]: Fetched https://www.credit-agricole.fr/ca-tourainepoitou: quality 1.00 via http
+2026/03/18 11:57:24 DEBUG [CAISSE REG CRED AGRIC MUT TOURAIN POITOU]: Extracting company info from content (length: 2401)
+2026/03/18 11:57:44 DEBUG [CAISSE REG CRED AGRIC MUT TOURAIN POITOU]: Company info extracted: Type=TECH_ADJACENT, TechStack=[]
+2026/03/18 11:57:44 DEBUG [CAISSE REG CRED AGRIC MUT TOURAIN POITOU]: No LinkedIn URL available, cannot search for individuals
+2026-03-18T19:05:16.944+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 19:05:48 DEBUG [INSECO]: Gemini discovery failed or empty (err: no JSON found in gemini response). Falling back to DDG...
+2026-03-18T19:05:48.324+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=INSECO+POITIERS+linkedin+company"}
+2026/03/18 19:05:48 DEBUG [INSECO]: DDG discovery result: website=, linkedin=
+2026/03/18 19:05:48 DEBUG [INSECO]: No target URL (LinkedIn or Website) found after discovery
+2026/03/18 19:24:38 INFO: Initializing enrichment pipeline...
+2026/03/18 19:24:38 INFO: Connecting to LLM providers...
+2026/03/18 19:24:38 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 19:24:38 INFO: Launching browser instance...
+2026-03-18T19:24:40.024+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 19:24:40 INFO: Browser ready.
+2026/03/18 19:24:40 INFO: Enriching 1 companies...
+2026/03/18 19:24:40 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 19:25:02 DEBUG [INSECO]: Gemini discovery success: website=https://www.inseco.fr, linkedin=https://www.linkedin.com/company/inseco
+2026-03-18T19:25:03.037+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/inseco"}
+2026/03/18 19:25:03 DEBUG [INSECO]: low quality fetch for https://www.linkedin.com/company/inseco (0.00), retrying with website https://www.inseco.fr
+2026/03/18 19:25:03 DEBUG [INSECO]: Website retry result: quality 1.00 via http
+2026/03/18 19:25:03 DEBUG [INSECO]: Extracting company info from content (length: 3758)
+2026/03/18 19:25:08 DEBUG [INSECO]: Company info extracted: Type=TECH, TechStack=[]
+2026/03/18 19:25:08 DEBUG [INSECO]: Fetching people from https://www.linkedin.com/company/inseco/people/ (with scroll)
+2026-03-18T19:25:08.052+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/inseco/people/", "scrolls": 3}
+2026/03/18 19:25:08 DEBUG [INSECO]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/inseco/people/: context canceled
+2026/03/18 19:25:08 DEBUG [INSECO]: Retrying contact search on website https://www.inseco.fr
+2026-03-18T19:25:08.053+0100	INFO	cache hit	{"url": "https://www.inseco.fr"}
+2026/03/18 19:25:08 DEBUG [INSECO]: Contact page fetched: quality 1.00, length 3758 via cache
+2026/03/18 19:25:08 DEBUG [INSECO]: ExtractPeopleFromPage result: count=0, err=<nil>
+2026/03/18 19:25:08 DEBUG [INSECO]: No contacts found on page, trying external search
+2026-03-18T19:25:08.967+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+INSECO+POITIERS+%28CTO+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026/03/18 19:25:08 DEBUG [INSECO]: No contacts found even with external search
+2026/03/18 19:25:08 INFO: Successfully enriched INSECO
+2026/03/18 19:25:29 INFO: Initializing enrichment pipeline...
+2026/03/18 19:25:29 INFO: Connecting to LLM providers...
+2026/03/18 19:25:29 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 19:25:29 INFO: Launching browser instance...
+2026-03-18T19:25:29.850+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 19:25:29 INFO: Browser ready.
+2026/03/18 19:25:29 INFO: Enriching 1 companies...
+2026-03-18T19:25:29.851+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/inseco"}
+2026/03/18 19:25:29 DEBUG [INSECO]: low quality fetch for https://www.linkedin.com/company/inseco (0.00), retrying with website https://www.inseco.com
+2026/03/18 19:25:31 DEBUG [INSECO]: Website retry result: quality 0.70 via http
+2026/03/18 19:25:31 DEBUG [INSECO]: Extracting company info from content (length: 543)
+2026/03/18 19:25:36 DEBUG [INSECO]: Company info extracted: Type=TECH, TechStack=[]
+2026/03/18 19:25:36 DEBUG [INSECO]: Fetching people from https://www.linkedin.com/company/inseco/people/ (with scroll)
+2026-03-18T19:25:36.239+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/inseco/people/", "scrolls": 3}
+2026/03/18 19:25:36 DEBUG [INSECO]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/inseco/people/: context canceled
+2026/03/18 19:25:36 DEBUG [INSECO]: Retrying contact search on website https://www.inseco.com
+2026-03-18T19:25:36.239+0100	INFO	cache hit	{"url": "https://www.inseco.com"}
+2026/03/18 19:25:36 DEBUG [INSECO]: Contact page fetched: quality 0.70, length 543 via cache
+2026/03/18 19:25:41 DEBUG [INSECO]: ExtractPeopleFromPage result: count=0, err=<nil>
+2026/03/18 19:25:41 DEBUG [INSECO]: No contacts found on page, trying external search
+2026-03-18T19:25:41.539+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+INSECO+POITIERS+%28CTO+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026/03/18 19:25:41 DEBUG [INSECO]: No contacts found even with external search
+2026/03/18 19:25:41 INFO: Successfully enriched INSECO
+2026/03/18 19:25:45 INFO: Initializing enrichment pipeline...
+2026/03/18 19:25:45 INFO: Connecting to LLM providers...
+2026/03/18 19:25:45 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 19:25:45 INFO: Launching browser instance...
+2026-03-18T19:25:46.364+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 19:25:46 INFO: Browser ready.
+2026/03/18 19:25:46 INFO: Enriching 5 companies...
+2026/03/18 19:25:46 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 19:25:49 DEBUG [EAU]: Gemini discovery success: website=http://www.eauxdevienne.fr/, linkedin=https://www.linkedin.com/company/eauxdevienne/
+2026-03-18T19:25:49.624+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/eauxdevienne/"}
+2026/03/18 19:25:49 DEBUG [EAU]: low quality fetch for https://www.linkedin.com/company/eauxdevienne/ (0.00), retrying with website http://www.eauxdevienne.fr/
+2026/03/18 19:25:49 DEBUG [EAU]: Website retry result: quality 1.00 via http
+2026/03/18 19:25:49 DEBUG [EAU]: Extracting company info from content (length: 1139)
+2026/03/18 19:26:18 DEBUG [EAU]: Company info extracted: Type=NON_TECH, TechStack=[]
+2026/03/18 19:26:18 DEBUG [EAU]: Fetching people from https://www.linkedin.com/company/eauxdevienne/people/ (with scroll)
+2026-03-18T19:26:18.167+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/eauxdevienne/people/", "scrolls": 3}
+2026/03/18 19:26:18 DEBUG [EAU]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/eauxdevienne/people/: context canceled
+2026/03/18 19:26:18 DEBUG [EAU]: Retrying contact search on website http://www.eauxdevienne.fr/
+2026-03-18T19:26:18.167+0100	INFO	cache hit	{"url": "http://www.eauxdevienne.fr/"}
+2026/03/18 19:26:18 DEBUG [EAU]: Contact page fetched: quality 1.00, length 1139 via cache
+2026/03/18 19:26:49 DEBUG [EAU]: ExtractPeopleFromPage result: count=0, err=<nil>
+2026/03/18 19:26:49 DEBUG [EAU]: No contacts found on page, trying external search
+2026-03-18T19:26:49.488+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+EAU+POITIERS+%28CTO+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026/03/18 19:26:49 DEBUG [EAU]: No contacts found even with external search
+2026/03/18 19:26:49 INFO: Successfully enriched EAU
+2026/03/18 19:26:50 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 19:27:07 DEBUG [ALPC-PC]: Gemini discovery success: website=https://www.nouvelle-aquitaine.fr, linkedin=https://www.linkedin.com/company/region-nouvelle-aquitaine
+2026-03-18T19:27:07.226+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/region-nouvelle-aquitaine"}
+2026/03/18 19:27:07 DEBUG [ALPC-PC]: low quality fetch for https://www.linkedin.com/company/region-nouvelle-aquitaine (0.00), retrying with website https://www.nouvelle-aquitaine.fr
+2026/03/18 19:27:09 DEBUG [ALPC-PC]: Website retry result: quality 1.00 via http
+2026/03/18 19:27:09 DEBUG [ALPC-PC]: Extracting company info from content (length: 5574)
+2026/03/18 19:27:26 DEBUG [ALPC-PC]: Company info extracted: Type=NON_TECH, TechStack=[]
+2026/03/18 19:27:26 DEBUG [ALPC-PC]: Fetching people from https://www.linkedin.com/company/region-nouvelle-aquitaine/people/ (with scroll)
+2026-03-18T19:27:26.726+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/region-nouvelle-aquitaine/people/", "scrolls": 3}
+2026/03/18 19:27:26 DEBUG [ALPC-PC]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/region-nouvelle-aquitaine/people/: context canceled
+2026/03/18 19:27:26 DEBUG [ALPC-PC]: Retrying contact search on website https://www.nouvelle-aquitaine.fr
+2026-03-18T19:27:26.727+0100	INFO	cache hit	{"url": "https://www.nouvelle-aquitaine.fr"}
+2026/03/18 19:27:26 DEBUG [ALPC-PC]: Contact page fetched: quality 1.00, length 5574 via cache
+2026/03/18 19:27:51 DEBUG [ALPC-PC]: ExtractPeopleFromPage result: count=0, err=<nil>
+2026/03/18 19:27:51 DEBUG [ALPC-PC]: No contacts found on page, trying external search
+2026-03-18T19:27:51.248+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+ALPC-PC+POITIERS+%28CTO+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026/03/18 19:27:51 DEBUG [ALPC-PC]: No contacts found even with external search
+2026/03/18 19:27:51 INFO: Successfully enriched ALPC-PC
+2026/03/18 19:27:52 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 19:27:56 DEBUG [CHU LA MILETRIE]: Gemini discovery success: website=https://www.chu-poitiers.fr/, linkedin=https://www.linkedin.com/company/chu-de-poitiers/
+2026-03-18T19:27:56.268+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/chu-de-poitiers/"}
+2026/03/18 19:27:56 DEBUG [CHU LA MILETRIE]: low quality fetch for https://www.linkedin.com/company/chu-de-poitiers/ (0.00), retrying with website https://www.chu-poitiers.fr/
+2026-03-18T19:27:56.389+0100	WARN	primary fetcher failed, trying fallback	{"error": "Get \"https://www.chu-poitiers.fr/\": tls: failed to verify certificate: x509: certificate signed by unknown authority", "url": "https://www.chu-poitiers.fr/"}
+2026/03/18 19:27:56 DEBUG [CHU LA MILETRIE]: Fetch failed or quality too low (0.00) for both LinkedIn and Website
+2026/03/18 19:27:56 INFO: Successfully enriched CHU LA MILETRIE
+2026/03/18 19:27:57 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 19:28:07 DEBUG [COMMUNAUTE DE COMMUNES DU CIVRAISIEN EN POITOU]: Gemini discovery success: website=https://www.civraisienpoitou.fr/, linkedin=
+2026/03/18 19:28:08 DEBUG [COMMUNAUTE DE COMMUNES DU CIVRAISIEN EN POITOU]: Fetched https://www.civraisienpoitou.fr/: quality 0.70 via http
+2026/03/18 19:28:08 DEBUG [COMMUNAUTE DE COMMUNES DU CIVRAISIEN EN POITOU]: Extracting company info from content (length: 952)
+2026/03/18 19:28:19 DEBUG [COMMUNAUTE DE COMMUNES DU CIVRAISIEN EN POITOU]: Company info extracted: Type=NON_TECH, TechStack=[]
+2026/03/18 19:28:19 DEBUG [COMMUNAUTE DE COMMUNES DU CIVRAISIEN EN POITOU]: No LinkedIn URL available, cannot search for individuals
+2026/03/18 19:28:19 INFO: Successfully enriched COMMUNAUTE DE COMMUNES DU CIVRAISIEN EN POITOU
+2026/03/18 19:28:20 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 19:28:28 DEBUG [COMMUNAUTE DE COMMUNES VIENNE ET GARTEMPE]: Gemini discovery success: website=https://www.vienneetgartempe.fr/, linkedin=
+2026/03/18 19:28:28 DEBUG [COMMUNAUTE DE COMMUNES VIENNE ET GARTEMPE]: Fetched https://www.vienneetgartempe.fr/: quality 1.00 via http
+2026/03/18 19:28:28 DEBUG [COMMUNAUTE DE COMMUNES VIENNE ET GARTEMPE]: Extracting company info from content (length: 5832)
+2026/03/18 19:28:59 DEBUG [COMMUNAUTE DE COMMUNES VIENNE ET GARTEMPE]: Company info extracted: Type=NON_TECH, TechStack=[]
+2026/03/18 19:28:59 DEBUG [COMMUNAUTE DE COMMUNES VIENNE ET GARTEMPE]: No LinkedIn URL available, cannot search for individuals
+2026/03/18 19:28:59 INFO: Successfully enriched COMMUNAUTE DE COMMUNES VIENNE ET GARTEMPE
+2026/03/18 19:29:20 INFO: Initializing enrichment pipeline...
+2026/03/18 19:29:20 INFO: Connecting to LLM providers...
+2026/03/18 19:29:20 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 19:29:20 INFO: Launching browser instance...
+2026-03-18T19:29:21.699+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 19:29:21 INFO: Browser ready.
+2026/03/18 19:29:21 INFO: Enriching 1 companies...
+2026-03-18T19:29:21.702+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/inseco"}
+2026/03/18 19:29:21 DEBUG [INSECO]: low quality fetch for https://www.linkedin.com/company/inseco (0.00), retrying with website https://inseco.com
+2026/03/18 19:29:22 DEBUG [INSECO]: Website retry result: quality 0.70 via http
+2026/03/18 19:29:22 DEBUG [INSECO]: Extracting company info from content (length: 543)
+2026/03/18 19:29:29 DEBUG [INSECO]: Company info extracted: Type=NON_TECH, TechStack=[]
+2026/03/18 19:29:29 DEBUG [INSECO]: Fetching people from https://www.linkedin.com/company/inseco/people/ (with scroll)
+2026-03-18T19:29:29.736+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/inseco/people/", "scrolls": 3}
+2026/03/18 19:29:29 DEBUG [INSECO]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/inseco/people/: context canceled
+2026/03/18 19:29:29 DEBUG [INSECO]: Retrying contact search on website https://inseco.com
+2026-03-18T19:29:29.736+0100	INFO	cache hit	{"url": "https://inseco.com"}
+2026/03/18 19:29:29 DEBUG [INSECO]: Contact page fetched: quality 0.70, length 543 via cache
+2026/03/18 19:29:32 JSON unmarshal failed, retrying once with error feedback: invalid character 'I' looking for beginning of value
+2026/03/18 19:29:46 DEBUG [INSECO]: ExtractPeopleFromPage result: count=0, err=<nil>
+2026/03/18 19:29:46 DEBUG [INSECO]: No contacts found on page, trying external search
+2026-03-18T19:29:46.065+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+INSECO+POITIERS+%28CTO+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026/03/18 19:29:46 DEBUG [INSECO]: No contacts found even with external search
+2026/03/18 19:29:46 INFO: Successfully enriched INSECO
+2026/03/18 19:29:50 INFO: Initializing enrichment pipeline...
+2026/03/18 19:29:50 INFO: Connecting to LLM providers...
+2026/03/18 19:29:50 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 19:29:50 INFO: Launching browser instance...
+2026-03-18T19:29:50.875+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 19:29:50 INFO: Browser ready.
+2026/03/18 19:29:50 INFO: Enriching 2 companies...
+2026/03/18 19:29:51 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 19:30:18 DEBUG [SERVICES DIVERS]: Gemini discovery success: website=https://www.orange.fr, linkedin=https://www.linkedin.com/company/orange-business-services/
+2026-03-18T19:30:18.456+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/orange-business-services/"}
+2026/03/18 19:30:18 DEBUG [SERVICES DIVERS]: low quality fetch for https://www.linkedin.com/company/orange-business-services/ (0.00), retrying with website https://www.orange.fr
+2026-03-18T19:30:18.634+0100	INFO	primary quality too low, trying fallback	{"quality": 0, "url": "https://www.orange.fr"}
+2026/03/18 19:30:18 DEBUG [SERVICES DIVERS]: Fetch failed or quality too low (0.00) for both LinkedIn and Website
+2026/03/18 19:30:18 INFO: Successfully enriched SERVICES DIVERS
+2026/03/18 19:30:19 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 19:30:29 DEBUG [E-QUAL]: Gemini discovery success: website=https://www.e-qual.fr, linkedin=https://www.linkedin.com/company/e-qual
+2026-03-18T19:30:29.353+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/e-qual"}
+2026/03/18 19:30:29 DEBUG [E-QUAL]: low quality fetch for https://www.linkedin.com/company/e-qual (0.00), retrying with website https://www.e-qual.fr
+2026-03-18T19:30:29.453+0100	WARN	primary fetcher failed, trying fallback	{"error": "Get \"https://www.e-qual.fr\": read tcp 192.168.1.15:33674->213.186.33.5:443: read: connection reset by peer", "url": "https://www.e-qual.fr"}
+2026/03/18 19:30:29 DEBUG [E-QUAL]: Fetch failed or quality too low (0.00) for both LinkedIn and Website
+2026/03/18 19:30:29 INFO: Successfully enriched E-QUAL
+2026/03/18 19:30:42 INFO: Initializing enrichment pipeline...
+2026/03/18 19:30:42 INFO: Connecting to LLM providers...
+2026/03/18 19:30:42 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 19:30:42 INFO: Launching browser instance...
+2026-03-18T19:30:42.890+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 19:30:42 INFO: Browser ready.
+2026/03/18 19:30:42 INFO: Enriching 1 companies...
+2026-03-18T19:30:42.891+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/inseco"}
+2026-03-18T19:30:42.891+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/inseco"}
+2026/03/18 19:30:42 DEBUG [INSECO]: low quality fetch for https://www.linkedin.com/company/inseco (0.00), retrying with website https://inseco.com
+2026-03-18T19:30:42.891+0100	INFO	cache hit	{"url": "https://inseco.com"}
+2026/03/18 19:30:42 DEBUG [INSECO]: Website retry result: quality 0.70 via cache
+2026/03/18 19:30:42 DEBUG [INSECO]: Extracting company info from content (length: 543)
+2026/03/18 19:31:01 DEBUG [INSECO]: Company info extracted: Type=, TechStack=[]
+2026/03/18 19:31:01 DEBUG [INSECO]: Fetching people from https://www.linkedin.com/company/inseco/people/ (with scroll)
+2026-03-18T19:31:01.720+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/inseco/people/", "scrolls": 3}
+2026-03-18T19:31:01.720+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/inseco/people/"}
+2026/03/18 19:31:01 DEBUG [INSECO]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/inseco/people/: invalid context
+2026/03/18 19:31:01 DEBUG [INSECO]: Retrying contact search on website https://inseco.com
+2026-03-18T19:31:01.721+0100	INFO	cache hit	{"url": "https://inseco.com"}
+2026/03/18 19:31:01 DEBUG [INSECO]: Contact page fetched: quality 0.70, length 543 via cache
+2026/03/18 19:31:46 Primary LLM provider failed, trying fallback gemini_cli: context deadline exceeded
+2026/03/18 19:32:31 DEBUG [INSECO]: ExtractPeopleFromPage result: count=0, err=gemini cli failed: signal: killed (stderr: Loaded cached credentials.
+Loading extension: gemini-notifier
+Scheduling MCP context refresh...
+Executing MCP context refresh...
+MCP context refresh complete.
+Registering notification handlers for server 'browser'. Capabilities: { tools: {} }
+Server 'browser' has tools but did not declare 'listChanged' capability. Listening anyway for robustness...
+Scheduling MCP context refresh...
+Executing MCP context refresh...
+MCP context refresh complete.
+[WARNING] --raw-output is enabled. Model output is not sanitized and may contain harmful ANSI sequences (e.g. for phishing or command injection). Use --accept-raw-output-risk to suppress this warning.
+)
+2026/03/18 19:32:31 DEBUG [INSECO]: No contacts found on page, trying external search
+2026-03-18T19:32:31.772+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+INSECO+POITIERS+%28CTO+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026-03-18T19:32:31.772+0100	INFO	browser fetching	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+INSECO+POITIERS+%28CTO+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026/03/18 19:32:31 DEBUG [INSECO]: No contacts found even with external search
+2026/03/18 19:32:31 INFO: Successfully enriched INSECO
+2026/03/18 19:32:41 INFO: Initializing enrichment pipeline...
+2026/03/18 19:32:41 INFO: Connecting to LLM providers...
+2026/03/18 19:32:41 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 19:32:41 INFO: Launching browser instance...
+2026-03-18T19:32:42.171+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 19:32:42 INFO: Browser ready.
+2026/03/18 19:32:42 INFO: Enriching 1 companies...
+2026-03-18T19:32:42.173+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/inseco"}
+2026-03-18T19:32:42.173+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/inseco"}
+2026/03/18 19:32:42 DEBUG [INSECO]: low quality fetch for https://www.linkedin.com/company/inseco (0.00), retrying with website https://inseco.com
+2026-03-18T19:32:42.173+0100	INFO	cache hit	{"url": "https://inseco.com"}
+2026/03/18 19:32:42 DEBUG [INSECO]: Website retry result: quality 0.70 via cache
+2026/03/18 19:32:42 DEBUG [INSECO]: Extracting company info from content (length: 543)
+2026/03/18 19:32:56 DEBUG [INSECO]: Company info extracted: Type=, TechStack=[]
+2026/03/18 19:32:56 DEBUG [INSECO]: Fetching people from https://www.linkedin.com/company/inseco/people/ (with scroll)
+2026-03-18T19:32:56.880+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/inseco/people/", "scrolls": 3}
+2026-03-18T19:32:56.880+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/inseco/people/"}
+2026/03/18 19:32:56 DEBUG [INSECO]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/inseco/people/: context canceled
+2026/03/18 19:32:56 DEBUG [INSECO]: Retrying contact search on website https://inseco.com
+2026-03-18T19:32:56.881+0100	INFO	cache hit	{"url": "https://inseco.com"}
+2026/03/18 19:32:56 DEBUG [INSECO]: Contact page fetched: quality 0.70, length 543 via cache
+2026/03/18 19:32:59 JSON unmarshal failed, retrying once with error feedback: invalid character 'I' looking for beginning of value
+2026/03/18 19:33:07 DEBUG [INSECO]: ExtractPeopleFromPage result: count=0, err=<nil>
+2026/03/18 19:33:07 DEBUG [INSECO]: No contacts found on page, trying external search
+2026-03-18T19:33:07.361+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+INSECO+POITIERS+%28CTO+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026-03-18T19:33:07.361+0100	INFO	browser fetching	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+INSECO+POITIERS+%28CTO+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026/03/18 19:33:07 DEBUG [INSECO]: No contacts found even with external search
+2026/03/18 19:33:07 INFO: Successfully enriched INSECO
+2026/03/18 19:33:19 INFO: Initializing enrichment pipeline...
+2026/03/18 19:33:19 INFO: Connecting to LLM providers...
+2026/03/18 19:33:19 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 19:33:19 INFO: Launching browser instance...
+2026-03-18T19:33:20.334+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 19:33:20 INFO: Browser ready.
+2026/03/18 19:33:20 INFO: Enriching 1 companies...
+2026-03-18T19:33:20.335+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/inseco"}
+2026-03-18T19:33:20.335+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/inseco"}
+2026/03/18 19:33:20 DEBUG [INSECO]: low quality fetch for https://www.linkedin.com/company/inseco (0.00), retrying with website https://inseco.com
+2026-03-18T19:33:20.335+0100	INFO	cache hit	{"url": "https://inseco.com"}
+2026/03/18 19:33:20 DEBUG [INSECO]: Website retry result: quality 0.70 via cache
+2026/03/18 19:33:20 DEBUG [INSECO]: Extracting company info from content (length: 543)
+2026/03/18 19:33:28 DEBUG [INSECO]: Company info extracted: Type=NON_TECH, TechStack=[]
+2026/03/18 19:33:28 DEBUG [INSECO]: Fetching people from https://www.linkedin.com/company/inseco/people/ (with scroll)
+2026-03-18T19:33:28.455+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/inseco/people/", "scrolls": 3}
+2026-03-18T19:33:28.455+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/inseco/people/"}
+2026/03/18 19:33:28 DEBUG [INSECO]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/inseco/people/: context canceled
+2026/03/18 19:33:28 DEBUG [INSECO]: Retrying contact search on website https://inseco.com
+2026-03-18T19:33:28.456+0100	INFO	cache hit	{"url": "https://inseco.com"}
+2026/03/18 19:33:28 DEBUG [INSECO]: Contact page fetched: quality 0.70, length 543 via cache
+2026/03/18 19:34:13 Primary LLM provider failed, trying fallback gemini_cli: context deadline exceeded
+2026/03/18 19:34:58 DEBUG [INSECO]: ExtractPeopleFromPage result: count=0, err=gemini cli failed: signal: killed (stderr: Loaded cached credentials.
+Loading extension: gemini-notifier
+Scheduling MCP context refresh...
+Executing MCP context refresh...
+MCP context refresh complete.
+Registering notification handlers for server 'browser'. Capabilities: { tools: {} }
+Server 'browser' has tools but did not declare 'listChanged' capability. Listening anyway for robustness...
+Scheduling MCP context refresh...
+Executing MCP context refresh...
+MCP context refresh complete.
+[WARNING] --raw-output is enabled. Model output is not sanitized and may contain harmful ANSI sequences (e.g. for phishing or command injection). Use --accept-raw-output-risk to suppress this warning.
+)
+2026/03/18 19:34:58 DEBUG [INSECO]: No contacts found on page, trying external search
+2026-03-18T19:34:58.486+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+INSECO+POITIERS+%28CTO+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026-03-18T19:34:58.486+0100	INFO	browser fetching	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+INSECO+POITIERS+%28CTO+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026/03/18 19:34:58 DEBUG [INSECO]: No contacts found even with external search
+2026/03/18 19:34:58 INFO: Successfully enriched INSECO
+2026/03/18 19:45:25 INFO: Initializing enrichment pipeline...
+2026/03/18 19:45:25 INFO: Connecting to LLM providers...
+2026/03/18 19:45:25 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 19:45:25 INFO: Launching browser instance...
+2026-03-18T19:45:26.311+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 19:45:26 INFO: Browser ready.
+2026/03/18 19:45:26 INFO: Enriching 1 companies...
+2026-03-18T19:45:26.312+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/inseco"}
+2026-03-18T19:45:26.312+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/inseco"}
+2026/03/18 19:45:26 DEBUG [INSECO]: low quality fetch for https://www.linkedin.com/company/inseco (0.00), retrying with website https://inseco.com
+2026-03-18T19:45:26.313+0100	INFO	cache hit	{"url": "https://inseco.com"}
+2026/03/18 19:45:26 DEBUG [INSECO]: Website retry result: quality 0.70 via cache
+2026/03/18 19:45:26 DEBUG [INSECO]: Extracting company info from content (length: 543)
+2026/03/18 19:46:11 Primary LLM provider failed, trying fallback gemini_cli: context deadline exceeded
+2026/03/18 19:49:40 DEBUG [INSECO]: Company info extraction failed: gemini cli failed: signal: killed (stderr: Loaded cached credentials.
+Loading extension: gemini-notifier
+Scheduling MCP context refresh...
+Executing MCP context refresh...
+MCP context refresh complete.
+Registering notification handlers for server 'browser'. Capabilities: { tools: {} }
+Server 'browser' has tools but did not declare 'listChanged' capability. Listening anyway for robustness...
+Scheduling MCP context refresh...
+Executing MCP context refresh...
+MCP context refresh complete.
+[WARNING] --raw-output is enabled. Model output is not sanitized and may contain harmful ANSI sequences (e.g. for phishing or command injection). Use --accept-raw-output-risk to suppress this warning.
+Error executing tool web_fetch: Tool "web_fetch" not found. Did you mean one of: "grep_search", "read_file", "cli_help"?
+Hook system message: [
+  {
+    "success": true
+  }
+]
+{}
+)
+2026/03/18 19:49:40 ERROR: Failed to enrich INSECO: company extraction failed: gemini cli failed: signal: killed (stderr: Loaded cached credentials.
+Loading extension: gemini-notifier
+Scheduling MCP context refresh...
+Executing MCP context refresh...
+MCP context refresh complete.
+Registering notification handlers for server 'browser'. Capabilities: { tools: {} }
+Server 'browser' has tools but did not declare 'listChanged' capability. Listening anyway for robustness...
+Scheduling MCP context refresh...
+Executing MCP context refresh...
+MCP context refresh complete.
+[WARNING] --raw-output is enabled. Model output is not sanitized and may contain harmful ANSI sequences (e.g. for phishing or command injection). Use --accept-raw-output-risk to suppress this warning.
+Error executing tool web_fetch: Tool "web_fetch" not found. Did you mean one of: "grep_search", "read_file", "cli_help"?
+Hook system message: [
+  {
+    "success": true
+  }
+]
+{}
+)
+2026/03/18 19:51:29 INFO: Initializing enrichment pipeline...
+2026/03/18 19:51:29 INFO: Connecting to LLM providers...
+2026/03/18 19:51:29 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 19:51:29 INFO: Launching browser instance...
+2026-03-18T19:51:30.360+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 19:51:30 INFO: Browser ready.
+2026/03/18 19:51:30 INFO: Enriching 1 companies...
+2026-03-18T19:51:30.361+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/inseco"}
+2026-03-18T19:51:30.361+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/inseco"}
+2026/03/18 19:51:30 DEBUG [INSECO]: low quality fetch for https://www.linkedin.com/company/inseco (0.00), retrying with website https://inseco.com
+2026-03-18T19:51:30.361+0100	INFO	cache hit	{"url": "https://inseco.com"}
+2026/03/18 19:51:30 DEBUG [INSECO]: Website retry result: quality 0.70 via cache
+2026/03/18 19:51:30 DEBUG [INSECO]: Extracting company info from content (length: 543)
+2026/03/18 19:51:34 DEBUG [INSECO]: Company info extracted: Type=NON_TECH, TechStack=[]
+2026/03/18 19:51:34 DEBUG [INSECO]: Fetching people from https://www.linkedin.com/company/inseco/people/ (with scroll)
+2026-03-18T19:51:34.544+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/inseco/people/", "scrolls": 3}
+2026-03-18T19:51:34.544+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/inseco/people/"}
+2026/03/18 19:51:34 DEBUG [INSECO]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/inseco/people/: context canceled
+2026/03/18 19:51:34 DEBUG [INSECO]: Retrying contact search on website https://inseco.com
+2026-03-18T19:51:34.545+0100	INFO	cache hit	{"url": "https://inseco.com"}
+2026/03/18 19:51:34 DEBUG [INSECO]: Contact page fetched: quality 0.70, length 543 via cache
+2026/03/18 19:51:37 DEBUG [INSECO]: ExtractPeopleFromPage result: count=0, err=<nil>
+2026/03/18 19:51:37 DEBUG [INSECO]: No contacts found on page, trying external search
+2026-03-18T19:51:37.203+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+INSECO+POITIERS+%28CTO+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026-03-18T19:51:37.203+0100	INFO	browser fetching	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+INSECO+POITIERS+%28CTO+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026/03/18 19:51:37 DEBUG [INSECO]: No contacts found even with external search
+2026/03/18 19:51:37 INFO: Successfully enriched INSECO
+2026/03/18 19:51:55 INFO: Initializing enrichment pipeline...
+2026/03/18 19:51:55 INFO: Connecting to LLM providers...
+2026/03/18 19:51:55 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 19:51:55 INFO: Launching browser instance...
+2026-03-18T19:51:56.453+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 19:51:56 INFO: Browser ready.
+2026/03/18 19:51:56 INFO: Enriching 1 companies...
+2026-03-18T19:51:56.454+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/inseco"}
+2026-03-18T19:51:56.454+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/inseco"}
+2026/03/18 19:51:56 DEBUG [INSECO]: low quality fetch for https://www.linkedin.com/company/inseco (0.00), retrying with website https://inseco.com
+2026-03-18T19:51:56.455+0100	INFO	cache hit	{"url": "https://inseco.com"}
+2026/03/18 19:51:56 DEBUG [INSECO]: Website retry result: quality 0.70 via cache
+2026/03/18 19:51:56 DEBUG [INSECO]: Extracting company info from content (length: 543)
+2026/03/18 19:51:57 DEBUG [INSECO]: Company info extracted: Type=NON_TECH, TechStack=[]
+2026/03/18 19:51:57 DEBUG [INSECO]: Fetching people from https://www.linkedin.com/company/inseco/people/ (with scroll)
+2026-03-18T19:51:57.964+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/inseco/people/", "scrolls": 3}
+2026-03-18T19:51:57.964+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/inseco/people/"}
+2026/03/18 19:51:57 DEBUG [INSECO]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/inseco/people/: context canceled
+2026/03/18 19:51:57 DEBUG [INSECO]: Retrying contact search on website https://inseco.com
+2026-03-18T19:51:57.964+0100	INFO	cache hit	{"url": "https://inseco.com"}
+2026/03/18 19:51:57 DEBUG [INSECO]: Contact page fetched: quality 0.70, length 543 via cache
+2026/03/18 19:52:48 JSON unmarshal failed, retrying once with error feedback: invalid character 'I' looking for beginning of value
+2026/03/18 19:52:49 DEBUG [INSECO]: ExtractPeopleFromPage result: count=0, err=<nil>
+2026/03/18 19:52:49 DEBUG [INSECO]: No contacts found on page, trying external search
+2026-03-18T19:52:49.982+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+INSECO+POITIERS+%28CTO+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026-03-18T19:52:49.982+0100	INFO	browser fetching	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+INSECO+POITIERS+%28CTO+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026/03/18 19:52:49 DEBUG [INSECO]: No contacts found even with external search
+2026/03/18 19:52:49 INFO: Successfully enriched INSECO
+2026/03/18 20:15:51 INFO: Initializing enrichment pipeline...
+2026/03/18 20:15:51 INFO: Connecting to LLM providers...
+2026/03/18 20:15:51 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 20:15:51 INFO: Launching browser instance...
+2026-03-18T20:15:52.057+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 20:15:52 INFO: Browser ready.
+2026/03/18 20:15:52 INFO: Enriching 1 companies...
+2026-03-18T20:15:52.058+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/inseco"}
+2026-03-18T20:15:52.058+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/inseco"}
+2026/03/18 20:15:52 DEBUG [INSECO]: low quality fetch for https://www.linkedin.com/company/inseco (0.00), retrying with website https://inseco.com
+2026-03-18T20:15:52.058+0100	INFO	cache hit	{"url": "https://inseco.com"}
+2026/03/18 20:15:52 DEBUG [INSECO]: Website retry result: quality 0.70 via cache
+2026/03/18 20:15:52 DEBUG [INSECO]: Extracting company info from content (length: 543)
+2026/03/18 20:16:27 DEBUG [INSECO]: Company info extracted: Type=, TechStack=[]
+2026/03/18 20:16:27 DEBUG [INSECO]: Fetching people from https://www.linkedin.com/company/inseco/people/ (with scroll)
+2026-03-18T20:16:27.744+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/inseco/people/", "scrolls": 3}
+2026-03-18T20:16:27.744+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/inseco/people/"}
+2026/03/18 20:16:27 DEBUG [INSECO]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/inseco/people/: context canceled
+2026/03/18 20:16:27 DEBUG [INSECO]: Retrying contact search on website https://inseco.com
+2026-03-18T20:16:27.744+0100	INFO	cache hit	{"url": "https://inseco.com"}
+2026/03/18 20:16:27 DEBUG [INSECO]: Contact page fetched: quality 0.70, length 543 via cache
+2026/03/18 20:16:31 DEBUG [INSECO]: ExtractPeopleFromPage result: count=5, err=<nil>
+2026/03/18 20:16:31 DEBUG [INSECO]: Found contact candidate: Mike Smith (CTO) - https://www.linkedin.com/in/mike-smith
+2026/03/18 20:16:31 DEBUG [INSECO]: Found contact candidate: Sarah Patel (VP Engineering) - https://www.linkedin.com/in/sarah-patel
+2026/03/18 20:16:31 DEBUG [INSECO]: Found contact candidate: John Doe (Engineering Manager) - https://www.linkedin.com/in/john-doe
+2026/03/18 20:16:31 DEBUG [INSECO]: Found contact candidate: Linda Nguyen (DevOps Engineer) - https://www.linkedin.com/in/linda-nguyen
+2026/03/18 20:16:31 DEBUG [INSECO]: Found contact candidate: Mark Brown (IT Director) - https://www.linkedin.com/in/mark-brown
+2026/03/18 20:16:31 Found 5 candidates for INSECO
+2026-03-18T20:16:31.213+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/in/mike-smith"}
+2026-03-18T20:16:31.213+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/in/mike-smith"}
+2026-03-18T20:16:31.214+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/in/sarah-patel"}
+2026-03-18T20:16:31.214+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/in/sarah-patel"}
+2026-03-18T20:16:31.214+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/in/john-doe"}
+2026-03-18T20:16:31.214+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/in/john-doe"}
+2026/03/18 20:16:57 Best contact for INSECO: Mike Smith (CTO)
+2026/03/18 20:16:57 INFO: Successfully enriched INSECO

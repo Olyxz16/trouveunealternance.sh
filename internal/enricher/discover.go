@@ -22,12 +22,13 @@ var (
 )
 
 type URLDiscoverer struct {
-	fetcher   *scraper.CascadeFetcher
-	geminiAPI *llm.GeminiAPIProvider // nil if not configured — falls back to DDG
+	fetcher    *scraper.CascadeFetcher
+	geminiAPI  *llm.GeminiAPIProvider // nil if not configured — falls back to DDG
+	classifier *Classifier
 }
 
-func NewURLDiscoverer(fetcher *scraper.CascadeFetcher, geminiAPI *llm.GeminiAPIProvider) *URLDiscoverer {
-	return &URLDiscoverer{fetcher: fetcher, geminiAPI: geminiAPI}
+func NewURLDiscoverer(fetcher *scraper.CascadeFetcher, geminiAPI *llm.GeminiAPIProvider, classifier *Classifier) *URLDiscoverer {
+	return &URLDiscoverer{fetcher: fetcher, geminiAPI: geminiAPI, classifier: classifier}
 }
 
 const discoverySystemPrompt = `You are finding the online presence of French companies.
@@ -36,16 +37,12 @@ Given a company name, SIREN, city and NAF code, find:
 2. Their LinkedIn company page URL
 
 RULES:
-- website must be the company's own domain — NEVER return URLs from:
-  societe.com, pappers.fr, manageo.fr, infogreffe.fr, verif.com,
-  linkedin.com, facebook.com, twitter.com, indeed.fr, welcometothejungle.com
-- linkedin_url must be a linkedin.com/company/ URL — never a /in/ personal profile
-- If you are not confident about a URL, return empty string for that field
-- Use your search capability to find accurate results
-- For public sector organisations (hospitals, mairies, CCAS) the website is
-  often a .fr government domain — include it if found
+- website must be the company's own domain — NEVER return directory sites (societe.com, pappers.fr, etc.)
+- linkedin_url must be a linkedin.com/company/ URL
+- Provide your BEST GUESS if you are not 100% sure, but mark it as empty if you have no idea.
+- If it's a public institution, look for their official .fr or .gouv.fr domain.
 
-Return ONLY a JSON object, no explanation:
+Return ONLY a JSON object:
 {
   "website": "https://...",
   "linkedin_url": "https://www.linkedin.com/company/..."
@@ -129,23 +126,33 @@ func (d *URLDiscoverer) discoverWithDDG(ctx context.Context, comp db.Company) (s
 		return "", "", fmt.Errorf("DDG search failed: %w", err)
 	}
 
-	linkedinURL := d.extractLinkedInURL(res.ContentMD)
+	website, linkedin, err := d.classifier.ExtractURLsFromSearch(ctx, res.ContentMD, "discovery_ddg")
+	if err == nil && (website != "" || linkedin != "") {
+		return website, linkedin, nil
+	}
 
-	if linkedinURL == "" {
-		query = fmt.Sprintf("%s linkedin company", comp.Name)
-		searchURL = fmt.Sprintf("https://duckduckgo.com/html/?q=%s", url.QueryEscape(query))
-		res, err = d.fetcher.Fetch(ctx, searchURL)
+	// Try more general query if first one failed
+	query = fmt.Sprintf("%s linkedin company", comp.Name)
+	searchURL = fmt.Sprintf("https://duckduckgo.com/html/?q=%s", url.QueryEscape(query))
+	res, err = d.fetcher.Fetch(ctx, searchURL)
+	if err == nil {
+		w, l, err := d.classifier.ExtractURLsFromSearch(ctx, res.ContentMD, "discovery_ddg_retry")
 		if err == nil {
-			linkedinURL = d.extractLinkedInURL(res.ContentMD)
+			if website == "" {
+				website = w
+			}
+			if linkedin == "" {
+				linkedin = l
+			}
 		}
 	}
 
-	// Last resort: guess slug from company name
-	if linkedinURL == "" {
-		linkedinURL = guessLinkedInSlug(comp.Name)
+	// Last resort: guess slug from company name if linkedin is still missing
+	if linkedin == "" {
+		linkedin = guessLinkedInSlug(comp.Name)
 	}
 
-	return "", linkedinURL, nil
+	return website, linkedin, nil
 }
 
 // extractLinkedInURL uses a regex instead of fragile string splitting.
@@ -168,6 +175,77 @@ func guessLinkedInSlug(name string) string {
 		return ""
 	}
 	return "https://www.linkedin.com/company/" + slug
+}
+
+func (d *URLDiscoverer) SearchPeopleOnLinkedIn(ctx context.Context, comp db.Company, titles []string) ([]IndividualContact, error) {
+	// 1. Try Gemini Search Grounding first if available
+	if d.geminiAPI != nil {
+		people, err := d.discoverPeopleWithGemini(ctx, comp, titles)
+		if err == nil && len(people) > 0 {
+			log.Printf("DEBUG [%s]: Gemini people discovery success: found %d contacts", comp.Name, len(people))
+			return people, nil
+		}
+		log.Printf("DEBUG [%s]: Gemini people discovery failed or empty (err: %v). Falling back to DDG...", comp.Name, err)
+	}
+
+	// 2. Fallback to DDG search
+	// titles like "CTO", "HR", "DevOps"
+	query := fmt.Sprintf("site:linkedin.com/in/ %s %s (%s)", comp.Name, comp.City.String, strings.Join(titles, " OR "))
+	searchURL := fmt.Sprintf("https://duckduckgo.com/html/?q=%s", url.QueryEscape(query))
+
+	res, err := d.fetcher.Fetch(ctx, searchURL)
+	if err != nil {
+		return nil, err
+	}
+
+	// Use the classifier to extract individual profiles from search result markdown
+	people, err := d.classifier.ExtractPeopleFromSearchResults(ctx, res.ContentMD, "linkedin_search_people")
+	if err != nil {
+		return nil, err
+	}
+
+	return people.Contacts, nil
+}
+
+func (d *URLDiscoverer) discoverPeopleWithGemini(ctx context.Context, comp db.Company, titles []string) ([]IndividualContact, error) {
+	prompt := fmt.Sprintf(
+		"Company: %s\nCity: %s\nTarget Roles: %s\n\nFind the LinkedIn profile URLs of key decision-makers or recruitment contacts (e.g., CTO, HR Manager, Founder) at this company.",
+		comp.Name,
+		comp.City.String,
+		strings.Join(titles, ", "),
+	)
+
+	system := `You are finding recruitment contacts at French companies.
+Find up to 5 people.
+Return ONLY a JSON object:
+{
+  "contacts": [
+    {"name": "...", "role": "...", "linkedin_url": "https://www.linkedin.com/in/...", "email": ""},
+    ...
+  ]
+}`
+
+	resp, err := d.geminiAPI.CompleteWithSearch(ctx, llm.CompletionRequest{
+		System: system,
+		User:   prompt,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	clean := extractJSONFromText(resp.Content)
+	if clean == "" {
+		return nil, fmt.Errorf("no JSON found in gemini people response")
+	}
+
+	var result struct {
+		Contacts []IndividualContact `json:"contacts"`
+	}
+	if err := json.Unmarshal([]byte(clean), &result); err != nil {
+		return nil, fmt.Errorf("failed to parse discovery JSON: %w", err)
+	}
+
+	return result.Contacts, nil
 }
 
 // extractJSONFromText finds the first {...} block in a text response.

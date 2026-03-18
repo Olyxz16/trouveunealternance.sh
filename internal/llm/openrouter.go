@@ -47,7 +47,7 @@ func NewOpenRouterProvider(apiKey, model string) *OpenRouterProvider {
 		Model:   model,
 		BaseURL: "https://openrouter.ai/api/v1",
 		HTTPClient: &http.Client{
-			Timeout: 60 * time.Second,
+			Timeout: 300 * time.Second,
 		},
 	}
 }

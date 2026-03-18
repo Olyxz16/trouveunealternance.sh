@@ -3,13 +3,63 @@ package scraper
 import (
 	"context"
 	"database/sql"
-	"errors"
+	stdErrors "errors"
 	"jobhunter/internal/db"
 	"strings"
 	"time"
 
+	"github.com/chromedp/chromedp"
 	"go.uber.org/zap"
 )
+
+// ... (struct and NewCascadeFetcher stay same)
+
+func (c *CascadeFetcher) tryFetcher(ctx context.Context, f Fetcher, url string) (FetchResult, error) {
+	if f == nil {
+		return FetchResult{}, stdErrors.New("no fetcher available")
+	}
+
+	html, err := f.Fetch(ctx, url)
+	if err != nil {
+		return FetchResult{}, err
+	}
+
+	markdown, err := c.extractor.Extract(html, url)
+	if err != nil {
+		return FetchResult{}, err
+	}
+
+	quality := calculateQuality(markdown)
+
+	res := FetchResult{
+		ContentMD: markdown,
+		Method:    f.Name(),
+		Quality:   quality,
+	}
+
+	// Save to cache
+	if shouldCache(url) {
+		now := time.Now()
+		expiresAt := now.Add(24 * time.Hour) // Default 24h
+		if strings.Contains(url, "linkedin.com") {
+			expiresAt = now.Add(7 * 24 * time.Hour)
+		}
+
+		err = c.cache.SetCache(&db.ScrapeCache{
+			URL:       url,
+			Method:    f.Name(),
+			ContentMD: markdown,
+			Quality:   quality,
+			FetchedAt: now.Format("2006-01-02 15:04:05"),
+			ExpiresAt: expiresAt.Format("2006-01-02 15:04:05"),
+		})
+		if err != nil {
+			c.logger.Error("failed to write to cache", zap.Error(err), zap.String("url", url))
+		}
+	}
+
+	return res, nil
+}
 
 type CascadeFetcher struct {
 	primary      Fetcher
@@ -80,12 +130,43 @@ func (c *CascadeFetcher) Fetch(ctx context.Context, url string) (FetchResult, er
 	return res, err
 }
 
-func (c *CascadeFetcher) tryFetcher(ctx context.Context, f Fetcher, url string) (FetchResult, error) {
-	if f == nil {
-		return FetchResult{}, errors.New("no fetcher available")
+func (c *CascadeFetcher) ScrollAndFetch(ctx context.Context, url string, scrolls int) (FetchResult, error) {
+	if c.fallback == nil {
+		return c.Fetch(ctx, url) // Fallback to normal fetch
 	}
 
-	html, err := f.Fetch(ctx, url)
+	// Browser must be available for scroll
+	browser, ok := c.fallback.(*BrowserFetcher)
+	if !ok {
+		return c.Fetch(ctx, url)
+	}
+
+	c.logger.Info("scrolling and fetching", zap.String("url", url), zap.Int("scrolls", scrolls))
+
+	// Ensure we are on the page - derive from browser.ctx but with timeout
+	fetchCtx, cancelFetch := context.WithTimeout(browser.ctx, 60*time.Second)
+	defer cancelFetch()
+
+	_, err := browser.Fetch(fetchCtx, url)
+	if err != nil {
+		return FetchResult{}, err
+	}
+
+	// Scroll - derive from browser.ctx
+	scrollCtx, cancelScroll := context.WithTimeout(browser.ctx, 30*time.Second)
+	defer cancelScroll()
+
+	err = browser.Scroll(scrollCtx, scrolls)
+	if err != nil {
+		c.logger.Warn("scroll failed", zap.Error(err))
+	}
+
+	// Get HTML after scroll - derive from browser.ctx
+	var html string
+	outerCtx, cancelOuter := context.WithTimeout(browser.ctx, 15*time.Second)
+	defer cancelOuter()
+	
+	err = chromedp.Run(outerCtx, chromedp.OuterHTML("html", &html, chromedp.ByQuery))
 	if err != nil {
 		return FetchResult{}, err
 	}
@@ -97,34 +178,11 @@ func (c *CascadeFetcher) tryFetcher(ctx context.Context, f Fetcher, url string) 
 
 	quality := calculateQuality(markdown)
 
-	res := FetchResult{
+	return FetchResult{
 		ContentMD: markdown,
-		Method:    f.Name(),
+		Method:    "browser_scroll",
 		Quality:   quality,
-	}
-
-	// Save to cache
-	if shouldCache(url) {
-		now := time.Now()
-		expiresAt := now.Add(24 * time.Hour) // Default 24h
-		if strings.Contains(url, "linkedin.com") {
-			expiresAt = now.Add(7 * 24 * time.Hour)
-		}
-
-		err = c.cache.SetCache(&db.ScrapeCache{
-			URL:       url,
-			Method:    f.Name(),
-			ContentMD: markdown,
-			Quality:   quality,
-			FetchedAt: now.Format("2006-01-02 15:04:05"),
-			ExpiresAt: expiresAt.Format("2006-01-02 15:04:05"),
-		})
-		if err != nil {
-			c.logger.Error("failed to write to cache", zap.Error(err), zap.String("url", url))
-		}
-	}
-
-	return res, nil
+	}, nil
 }
 
 // shouldCache returns false for search engine result pages that must never

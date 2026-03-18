@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"jobhunter/internal/errors"
+	"log"
 	"net/http"
 	"time"
 )
@@ -27,7 +28,7 @@ func NewGeminiAPIProvider(apiKey, model string) *GeminiAPIProvider {
 		APIKey: apiKey,
 		Model:  model,
 		HTTPClient: &http.Client{
-			Timeout: 120 * time.Second, // generous — search grounding takes time
+			Timeout: 300 * time.Second, // generous — search grounding takes time
 		},
 	}
 }
@@ -89,6 +90,7 @@ func (p *GeminiAPIProvider) CompleteWithSearch(ctx context.Context, req Completi
 }
 
 func (p *GeminiAPIProvider) complete(ctx context.Context, req CompletionRequest, withSearch bool) (CompletionResponse, error) {
+	log.Printf("Gemini API call (model=%s, withSearch=%v)", p.Model, withSearch)
 	payload := geminiRequest{
 		Contents: []geminiContent{
 			{Role: "user", Parts: []geminiPart{{Text: req.User}}},
