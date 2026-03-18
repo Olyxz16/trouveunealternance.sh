@@ -22,6 +22,8 @@ type Config struct {
 	BrowserHeadless     bool   `env:"BROWSER_HEADLESS"        envDefault:"true"`
 	BrowserBinaryPath   string `env:"BROWSER_BINARY_PATH"     envDefault:""`
 	ForceBrowserDomains string `env:"FORCE_BROWSER_DOMAINS"   envDefault:"linkedin.com,duckduckgo.com"`
+	GeminiAPIKey        string `env:"GEMINI_API_KEY"        envDefault:""`
+	GeminiAPIModel      string `env:"GEMINI_API_MODEL"      envDefault:"gemini-2.5-flash"`
 }
 
 func Load() *Config {

@@ -1,0 +1,15 @@
+{
+  "name": "Your Name",
+  "school": "Your School",
+  "skills": ["Python", "Docker", "Linux", "CI/CD", "Go"],
+  "projects": [
+    {
+      "name": "Project 1",
+      "description": "Description of project 1",
+      "stack": ["Go", "SQLite"]
+    }
+  ],
+  "availability": "September 2025",
+  "duration": "6 months",
+  "interests": ["Infrastructure", "Backend", "Distributed Systems"]
+}

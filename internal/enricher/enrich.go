@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"jobhunter/internal/collector"
 	"jobhunter/internal/db"
+	"jobhunter/internal/llm"
 	"jobhunter/internal/scraper"
 	"log"
 	"strings"
@@ -15,14 +16,21 @@ type Enricher struct {
 	fetcher    *scraper.CascadeFetcher
 	classifier *Classifier
 	recherche  *collector.RechercheClient
+	geminiAPI  *llm.GeminiAPIProvider // nil if not configured
 }
 
-func NewEnricher(database *db.DB, fetcher *scraper.CascadeFetcher, classifier *Classifier) *Enricher {
+func NewEnricher(
+	database *db.DB,
+	fetcher *scraper.CascadeFetcher,
+	classifier *Classifier,
+	geminiAPI *llm.GeminiAPIProvider,
+) *Enricher {
 	return &Enricher{
 		db:         database,
 		fetcher:    fetcher,
 		classifier: classifier,
 		recherche:  collector.NewRechercheClient(),
+		geminiAPI:  geminiAPI,
 	}
 }
 
@@ -67,8 +75,8 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 	// 1. Discover URLs if missing
 	linkedin := comp.LinkedinURL.String
 	if website == "" || linkedin == "" {
-		disc := NewURLDiscoverer(e.fetcher, e.classifier)
-		w, l, err := disc.DiscoverURLs(ctx, *comp, runID)
+		disc := NewURLDiscoverer(e.fetcher, e.geminiAPI)
+		w, l, err := disc.DiscoverURLs(ctx, *comp)
 		if err == nil {
 			if website == "" {
 				website = w
@@ -89,6 +97,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 		targetURL = website
 	}
 	if targetURL == "" {
+		log.Printf("DEBUG [%s]: No target URL (LinkedIn or Website) found after discovery", comp.Name)
 		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{
 			"status": "NO_CONTACT_FOUND",
 		})
@@ -97,19 +106,23 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 
 	res, err := e.fetcher.Fetch(ctx, targetURL)
 	if err == nil {
-		log.Printf("Fetched %s: quality %.2f via %s", targetURL, res.Quality, res.Method)
+		log.Printf("DEBUG [%s]: Fetched %s: quality %.2f via %s", comp.Name, targetURL, res.Quality, res.Method)
 	}
 
 	if err != nil || res.Quality < 0.3 {
-		// Guessed LinkedIn slug may be wrong — try website as fallback
 		if website != "" && targetURL != website {
-			log.Printf("Low quality fetch for %s (%.2f), retrying with website %s",
-				targetURL, res.Quality, website)
+			log.Printf("DEBUG [%s]: low quality fetch for %s (%.2f), retrying with website %s",
+				comp.Name, targetURL, res.Quality, website)
 			res, err = e.fetcher.Fetch(ctx, website)
+			if err == nil {
+				log.Printf("DEBUG [%s]: Website retry result: quality %.2f via %s", comp.Name, res.Quality, res.Method)
+			}
 		}
 		if err != nil || res.Quality < 0.3 {
-			// Clear the bad LinkedIn URL so it is not persisted
-			if strings.Contains(targetURL, "linkedin.com") && linkedin != comp.LinkedinURL.String {
+			log.Printf("DEBUG [%s]: Fetch failed or quality too low (%.2f) for both LinkedIn and Website", comp.Name, res.Quality)
+			// guessed URL was wrong — clear it if we wrote it
+			if strings.Contains(targetURL, "linkedin.com") &&
+				targetURL != comp.LinkedinURL.String {
 				_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{
 					"linkedin_url": "",
 				})
@@ -122,10 +135,13 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 	}
 
 	// 3. Extract company-level info
+	log.Printf("DEBUG [%s]: Extracting company info from content (length: %d)", comp.Name, len(res.ContentMD))
 	info, err := e.classifier.ExtractCompanyInfo(ctx, res.ContentMD, runID)
 	if err != nil {
+		log.Printf("DEBUG [%s]: Company info extraction failed: %v", comp.Name, err)
 		return fmt.Errorf("company extraction failed: %w", err)
 	}
+	log.Printf("DEBUG [%s]: Company info extracted: Type=%s, TechStack=%v", comp.Name, info.CompanyType, info.TechStack)
 
 	updates := map[string]interface{}{
 		"description":            info.Description,
@@ -143,20 +159,24 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 
 	// 4. Discover individuals from LinkedIn People tab
 	if linkedin == "" {
+		log.Printf("DEBUG [%s]: No LinkedIn URL available, cannot search for individuals", comp.Name)
 		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "NO_CONTACT_FOUND"})
 		return nil
 	}
 
 	peopleURL := strings.TrimSuffix(linkedin, "/") + "/people/"
+	log.Printf("DEBUG [%s]: Fetching people from %s", comp.Name, peopleURL)
 	peopleRes, err := e.fetcher.Fetch(ctx, peopleURL)
 	if err != nil {
+		log.Printf("DEBUG [%s]: People fetch failed: %v", comp.Name, err)
 		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "NO_CONTACT_FOUND"})
 		return nil
 	}
+	log.Printf("DEBUG [%s]: People page fetched: quality %.2f, length %d", comp.Name, peopleRes.Quality, len(peopleRes.ContentMD))
 
 	people, err := e.classifier.ExtractPeopleFromPage(ctx, peopleRes.ContentMD, runID)
 	if err != nil || len(people.Contacts) == 0 {
-		log.Printf("No contacts found on LinkedIn for %s (err: %v)", comp.Name, err)
+		log.Printf("DEBUG [%s]: No contacts found on LinkedIn (err: %v, count: %d)", comp.Name, err, len(people.Contacts))
 		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "NO_CONTACT_FOUND"})
 		return nil
 	}

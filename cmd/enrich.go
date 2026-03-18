@@ -107,6 +107,14 @@ var enrichCmd = &cobra.Command{
 			llmClient := llm.NewClient(primary, fallback, cfg.OpenRouterRPM, database)
 			classifier := enricher.NewClassifier(llmClient, database)
 
+			var geminiAPI *llm.GeminiAPIProvider
+			if cfg.GeminiAPIKey != "" {
+				geminiAPI = llm.NewGeminiAPIProvider(cfg.GeminiAPIKey, cfg.GeminiAPIModel)
+				logCh <- tui.LogMsg{Level: "INFO", Text: "Gemini API search grounding enabled for URL discovery"}
+			} else {
+				logCh <- tui.LogMsg{Level: "WARN", Text: "GEMINI_API_KEY not set — falling back to DuckDuckGo for discovery"}
+			}
+
 			// Setup Scraper
 			logCh <- tui.LogMsg{Level: "INFO", Text: "Launching browser instance..."}
 			httpFetcher := scraper.NewHTTPFetcher()
@@ -127,7 +135,7 @@ var enrichCmd = &cobra.Command{
 			forceDomains := strings.Split(cfg.ForceBrowserDomains, ",")
 			extractor := scraper.NewExtractor()
 			cascade := scraper.NewCascadeFetcher(httpFetcher, browserFetcher, forceDomains, database, extractor, logger)
-			enr := enricher.NewEnricher(database, cascade, classifier)
+			enr := enricher.NewEnricher(database, cascade, classifier, geminiAPI)
 
 			p.Send(tui.ReadyMsg{})
 			logCh <- tui.LogMsg{Level: "INFO", Text: fmt.Sprintf("Enriching %d companies...", len(targetCompanies))}

@@ -3,7 +3,7 @@ version: '3'
 vars:
   CITY: Poitiers
   DEPTS: 86
-  BATCH: 10
+  BATCH: 20
 
 tasks:
   # ── PROSPECTING ─────────────────────────────────────────────────────────────

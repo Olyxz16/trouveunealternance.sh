@@ -1,0 +1,342 @@
+2026/03/15 22:28:36 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:28:45 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:29:22 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:29:25 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:31:49 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:31:53 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:31:55 Primary LLM openrouter failed (attempt 3/4), retrying in 4s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:32:01 Primary LLM provider failed, trying fallback gemini_cli: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:32:44 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:32:47 Primary LLM provider failed, trying fallback gemini_cli: Model openrouter/free returned error status 402
+2026/03/15 22:33:29 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:33:35 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:33:38 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:33:59 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:34:39 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:34:42 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:34:44 Primary LLM openrouter failed (attempt 3/4), retrying in 4s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:35:28 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:35:30 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:35:50 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:36:05 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:36:08 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:36:11 Primary LLM openrouter failed (attempt 3/4), retrying in 4s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:36:26 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:36:54 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:37:12 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:37:15 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:37:33 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:37:53 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:38:02 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:38:06 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:38:09 Primary LLM openrouter failed (attempt 3/4), retrying in 4s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:38:14 Primary LLM provider failed, trying fallback gemini_cli: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:38:35 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:38:38 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:38:46 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:38:52 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:39:13 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:40:11 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:40:14 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:40:17 Primary LLM openrouter failed (attempt 3/4), retrying in 4s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:41:14 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:41:30 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:41:38 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:42:28 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:42:31 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:42:34 Primary LLM openrouter failed (attempt 3/4), retrying in 4s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:42:40 Primary LLM provider failed, trying fallback gemini_cli: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:43:02 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:43:48 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:43:50 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:46:06 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:46:09 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:46:15 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:46:18 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:46:21 Primary LLM openrouter failed (attempt 3/4), retrying in 4s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:46:27 Primary LLM provider failed, trying fallback gemini_cli: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:46:51 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:47:17 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:48:03 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:51:15 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:52:37 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:52:43 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:53:01 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:53:46 JSON unmarshal failed, retrying once with error feedback: json: cannot unmarshal string into Go struct field CompanyScore.has_internal_tech_team of type bool
+2026/03/15 22:53:47 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:54:22 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:54:56 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:56:26 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:56:51 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:56:55 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:57:49 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:57:52 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:57:55 Primary LLM openrouter failed (attempt 3/4), retrying in 4s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 22:58:33 Primary LLM provider failed, trying fallback gemini_cli: context deadline exceeded
+2026/03/15 23:01:31 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:02:08 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:02:54 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:02:57 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:03:00 Primary LLM openrouter failed (attempt 3/4), retrying in 4s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:03:23 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:03:24 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:03:27 Primary LLM openrouter failed (attempt 3/4), retrying in 4s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:03:33 Primary LLM provider failed, trying fallback gemini_cli: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:03:58 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:04:01 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:04:42 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:04:45 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:04:47 Primary LLM openrouter failed (attempt 3/4), retrying in 4s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:04:52 Primary LLM provider failed, trying fallback gemini_cli: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:05:16 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:05:45 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:05:57 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:07:00 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:07:02 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:07:19 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:08:50 Primary LLM provider failed, trying fallback gemini_cli: no choices returned from OpenRouter
+2026/03/15 23:10:26 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:10:30 JSON unmarshal failed, retrying once with error feedback: json: cannot unmarshal string into Go struct field CompanyScore.has_internal_tech_team of type bool
+2026/03/15 23:10:31 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:11:33 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:11:36 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:12:01 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:12:08 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:12:14 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:12:36 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:12:43 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:13:10 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:13:30 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:13:32 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/15 23:13:35 Primary LLM openrouter failed (attempt 3/4), retrying in 4s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026-03-15T23:16:46.367+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026-03-15T23:24:05.871+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026-03-15T23:29:18.407+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026-03-15T23:35:47.695+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026-03-15T23:35:47.695+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=CENTRE+HOSPITALIER+HENRI+LABORIT+POITIERS+linkedin+company"}
+2026-03-15T23:35:48.696+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=CENTRE+COMMUNAL+ACTION+SOCIALE+POITIERS+linkedin+company"}
+2026-03-15T23:35:49.697+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=RESIDENCE+THEODORE+ARNAULT+EHPAD+MIREBEAU+linkedin+company"}
+2026-03-15T23:35:50.698+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=MAIRIE+CHATELLERAULT+linkedin+company"}
+2026-03-15T23:35:51.699+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=CAISSE+REG+CRED+AGRIC+MUT+TOURAIN+POITOU+POITIERS+linkedin+company"}
+2026-03-15T23:35:52.700+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=LIGUE+DE+L%27ENSEIGNEMENT+NOUVELLE+AQUITAINE+POITIERS+linkedin+company"}
+2026-03-15T23:35:53.701+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=SNCF+RESEAU+POITIERS+linkedin+company"}
+2026-03-15T23:35:54.702+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=NEXTEAM+CHATELLERAULT+MACHINING+CHATELLERAULT+linkedin+company"}
+2026-03-15T23:35:55.703+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=ENEDIS+POITIERS+linkedin+company"}
+2026-03-15T23:35:56.704+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=CNP+ASSURANCES+IARD+POITIERS+linkedin+company"}
+2026-03-15T23:41:36.752+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026-03-15T23:41:36.753+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+HOSPITALIER+HENRI+LABORIT+POITIERS+official+website"}
+2026-03-15T23:41:38.754+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+HOSPITALIER+HENRI+LABORIT+POITIERS+linkedin+company"}
+2026-03-15T23:41:40.754+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+HOSPITALIER+HENRI+LABORIT+official+website+linkedin"}
+2026-03-15T23:41:41.766+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+COMMUNAL+ACTION+SOCIALE+POITIERS+official+website"}
+2026-03-15T23:41:43.766+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+COMMUNAL+ACTION+SOCIALE+POITIERS+linkedin+company"}
+2026-03-15T23:41:45.767+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+COMMUNAL+ACTION+SOCIALE+official+website+linkedin"}
+2026-03-15T23:41:46.775+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=RESIDENCE+THEODORE+ARNAULT+EHPAD+MIREBEAU+official+website"}
+2026-03-15T23:41:48.776+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=RESIDENCE+THEODORE+ARNAULT+EHPAD+MIREBEAU+linkedin+company"}
+2026-03-15T23:41:50.777+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=RESIDENCE+THEODORE+ARNAULT+EHPAD+official+website+linkedin"}
+2026-03-15T23:41:51.783+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=MAIRIE+CHATELLERAULT+official+website"}
+2026-03-15T23:41:53.784+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=MAIRIE+CHATELLERAULT+linkedin+company"}
+2026-03-15T23:41:55.785+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=MAIRIE+official+website+linkedin"}
+2026-03-15T23:43:36.438+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026-03-15T23:43:36.438+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+HOSPITALIER+HENRI+LABORIT+POITIERS+official+website"}
+2026-03-15T23:43:38.439+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+HOSPITALIER+HENRI+LABORIT+POITIERS+linkedin+company"}
+2026-03-15T23:43:40.440+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+HOSPITALIER+HENRI+LABORIT+official+website+linkedin"}
+2026-03-15T23:43:41.445+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+COMMUNAL+ACTION+SOCIALE+POITIERS+official+website"}
+2026-03-15T23:43:43.447+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+COMMUNAL+ACTION+SOCIALE+POITIERS+linkedin+company"}
+2026-03-15T23:43:45.447+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+COMMUNAL+ACTION+SOCIALE+official+website+linkedin"}
+2026-03-16T10:43:47.164+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026-03-16T10:43:47.164+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+HOSPITALIER+HENRI+LABORIT+POITIERS+official+website"}
+2026-03-16T10:43:49.165+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+HOSPITALIER+HENRI+LABORIT+POITIERS+linkedin+company"}
+2026-03-16T10:43:51.166+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+HOSPITALIER+HENRI+LABORIT+official+website+linkedin"}
+2026-03-16T10:43:52.174+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+COMMUNAL+ACTION+SOCIALE+POITIERS+official+website"}
+2026-03-16T10:43:54.175+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+COMMUNAL+ACTION+SOCIALE+POITIERS+linkedin+company"}
+2026-03-16T10:43:56.175+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+COMMUNAL+ACTION+SOCIALE+official+website+linkedin"}
+2026-03-16T10:44:00.485+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026-03-16T10:44:00.485+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+HOSPITALIER+HENRI+LABORIT+POITIERS+official+website"}
+2026-03-16T10:44:02.487+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+HOSPITALIER+HENRI+LABORIT+POITIERS+linkedin+company"}
+2026-03-16T10:44:04.488+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+HOSPITALIER+HENRI+LABORIT+official+website+linkedin"}
+2026-03-16T10:44:05.496+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+COMMUNAL+ACTION+SOCIALE+POITIERS+official+website"}
+2026-03-16T10:44:07.497+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+COMMUNAL+ACTION+SOCIALE+POITIERS+linkedin+company"}
+2026-03-16T10:44:09.499+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+COMMUNAL+ACTION+SOCIALE+official+website+linkedin"}
+2026-03-16T10:44:10.535+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=RESIDENCE+THEODORE+ARNAULT+EHPAD+MIREBEAU+official+website"}
+2026-03-16T10:44:12.536+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=RESIDENCE+THEODORE+ARNAULT+EHPAD+MIREBEAU+linkedin+company"}
+2026-03-16T10:44:14.537+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=RESIDENCE+THEODORE+ARNAULT+EHPAD+official+website+linkedin"}
+2026-03-16T10:44:15.572+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=MAIRIE+CHATELLERAULT+official+website"}
+2026-03-16T10:44:17.573+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=MAIRIE+CHATELLERAULT+linkedin+company"}
+2026-03-16T10:44:19.573+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=MAIRIE+official+website+linkedin"}
+2026-03-16T10:44:20.580+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CAISSE+REG+CRED+AGRIC+MUT+TOURAIN+POITOU+POITIERS+official+website"}
+2026-03-16T10:56:45.455+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026-03-16T10:56:45.610+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+HOSPITALIER+HENRI+LABORIT+POITIERS+official+website"}
+2026-03-16T10:56:47.611+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+HOSPITALIER+HENRI+LABORIT+POITIERS+linkedin+company"}
+2026-03-16T10:56:49.612+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+HOSPITALIER+HENRI+LABORIT+official+website+linkedin"}
+2026-03-16T10:56:49.646+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/centre-hospitalier-henri-laborit"}
+2026-03-16T10:56:50.694+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+COMMUNAL+ACTION+SOCIALE+POITIERS+official+website"}
+2026-03-16T10:56:52.695+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+COMMUNAL+ACTION+SOCIALE+POITIERS+linkedin+company"}
+2026-03-16T10:56:54.697+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CENTRE+COMMUNAL+ACTION+SOCIALE+official+website+linkedin"}
+2026-03-16T10:56:54.703+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/centre-communal-action-sociale"}
+2026-03-16T10:56:55.746+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=RESIDENCE+THEODORE+ARNAULT+EHPAD+MIREBEAU+official+website"}
+2026-03-16T10:56:57.746+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=RESIDENCE+THEODORE+ARNAULT+EHPAD+MIREBEAU+linkedin+company"}
+2026-03-16T10:56:59.747+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=RESIDENCE+THEODORE+ARNAULT+EHPAD+official+website+linkedin"}
+2026-03-16T10:56:59.781+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/residence-theodore-arnault-ehpad"}
+2026-03-16T10:57:00.822+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=MAIRIE+CHATELLERAULT+official+website"}
+2026-03-16T10:57:02.822+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=MAIRIE+CHATELLERAULT+linkedin+company"}
+2026-03-16T10:57:04.824+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=MAIRIE+official+website+linkedin"}
+2026-03-16T10:57:04.830+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/mairie"}
+2026-03-16T10:57:05.880+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CAISSE+REG+CRED+AGRIC+MUT+TOURAIN+POITOU+POITIERS+official+website"}
+2026-03-16T10:57:07.881+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CAISSE+REG+CRED+AGRIC+MUT+TOURAIN+POITOU+POITIERS+linkedin+company"}
+2026-03-16T10:57:09.881+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CAISSE+REG+CRED+AGRIC+MUT+TOURAIN+POITOU+official+website+linkedin"}
+2026-03-16T10:57:09.888+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/caisse-reg-cred-agric-mut-tourain-poitou"}
+2026-03-16T10:57:10.921+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=LIGUE+DE+L%27ENSEIGNEMENT+NOUVELLE+AQUITAINE+POITIERS+official+website"}
+2026-03-16T10:57:12.922+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=LIGUE+DE+L%27ENSEIGNEMENT+NOUVELLE+AQUITAINE+POITIERS+linkedin+company"}
+2026-03-16T10:57:14.923+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=LIGUE+DE+L%27ENSEIGNEMENT+NOUVELLE+AQUITAINE+official+website+linkedin"}
+2026-03-16T10:57:14.929+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/ligue-de-l-enseignement-nouvelle-aquitaine"}
+2026-03-16T10:57:15.977+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=SNCF+RESEAU+POITIERS+official+website"}
+2026-03-16T10:57:17.978+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=SNCF+RESEAU+POITIERS+linkedin+company"}
+2026-03-16T10:57:19.978+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=SNCF+RESEAU+official+website+linkedin"}
+2026-03-16T10:57:20.011+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/sncf-reseau"}
+2026-03-16T10:57:21.064+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=NEXTEAM+CHATELLERAULT+MACHINING+CHATELLERAULT+official+website"}
+2026-03-16T10:57:23.065+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=NEXTEAM+CHATELLERAULT+MACHINING+CHATELLERAULT+linkedin+company"}
+2026-03-16T10:57:25.066+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=NEXTEAM+CHATELLERAULT+MACHINING+official+website+linkedin"}
+2026-03-16T10:57:25.073+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/nexteam-chatellerault-machining"}
+2026-03-16T10:57:26.104+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=ENEDIS+POITIERS+official+website"}
+2026-03-16T10:57:28.105+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=ENEDIS+POITIERS+linkedin+company"}
+2026-03-16T10:57:30.106+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=ENEDIS+official+website+linkedin"}
+2026-03-16T10:57:30.113+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/enedis"}
+2026-03-16T10:57:31.150+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CNP+ASSURANCES+IARD+POITIERS+official+website"}
+2026-03-16T10:57:33.151+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CNP+ASSURANCES+IARD+POITIERS+linkedin+company"}
+2026-03-16T10:57:35.152+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CNP+ASSURANCES+IARD+official+website+linkedin"}
+2026-03-16T10:57:35.159+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/cnp-assurances-iard"}
+2026-03-16T11:01:58.580+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026-03-16T11:01:58.738+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=PRELUDE+DEVELOPPEMENT+SAINT-BENOIT+official+website"}
+2026-03-16T11:02:00.739+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=PRELUDE+DEVELOPPEMENT+SAINT-BENOIT+linkedin+company"}
+2026-03-16T11:02:02.740+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=PRELUDE+DEVELOPPEMENT+official+website+linkedin"}
+2026-03-16T11:02:02.746+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/prelude-developpement"}
+2026-03-16T11:02:03.786+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=TATA+CONSULTANCY+SERVICES+FRANCE+CHASSENEUIL-DU-POITOU+official+website"}
+2026-03-16T11:02:05.786+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=TATA+CONSULTANCY+SERVICES+FRANCE+CHASSENEUIL-DU-POITOU+linkedin+company"}
+2026-03-16T11:02:07.788+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=TATA+CONSULTANCY+SERVICES+FRANCE+official+website+linkedin"}
+2026-03-16T11:02:07.794+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/tata-consultancy-services-france"}
+2026-03-16T11:02:08.884+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=SALVERT+ENFANCE+ET+FAMILLE+MIGNE-AUXANCES+official+website"}
+2026-03-16T11:02:10.885+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=SALVERT+ENFANCE+ET+FAMILLE+MIGNE-AUXANCES+linkedin+company"}
+2026-03-16T11:02:12.886+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=SALVERT+ENFANCE+ET+FAMILLE+official+website+linkedin"}
+2026-03-16T11:02:12.921+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/salvert-enfance-et-famille"}
+2026-03-16T11:02:13.966+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=INLEED+JAUNAY-MARIGNY+official+website"}
+2026-03-16T11:02:15.967+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=INLEED+JAUNAY-MARIGNY+linkedin+company"}
+2026-03-16T11:02:17.968+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=INLEED+official+website+linkedin"}
+2026-03-16T11:02:17.974+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/inleed"}
+2026-03-16T11:02:19.013+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=ETABLISSEMENT+DE+CHATELLERAULT+CHATELLERAULT+official+website"}
+2026-03-16T11:02:21.014+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=ETABLISSEMENT+DE+CHATELLERAULT+CHATELLERAULT+linkedin+company"}
+2026-03-16T11:02:23.015+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=ETABLISSEMENT+DE+CHATELLERAULT+official+website+linkedin"}
+2026-03-16T11:02:23.022+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/etablissement-de-chatellerault"}
+2026-03-16T11:02:24.091+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=IREC+CHASSENEUIL-DU-POITOU+official+website"}
+2026-03-16T11:02:26.091+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=IREC+CHASSENEUIL-DU-POITOU+linkedin+company"}
+2026-03-16T11:02:28.092+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=IREC+official+website+linkedin"}
+2026-03-16T11:02:28.097+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/irec"}
+2026-03-16T11:02:29.384+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=PHARMAGEST+INTERACTIVE+POITIERS+official+website"}
+2026-03-16T11:02:31.385+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=PHARMAGEST+INTERACTIVE+POITIERS+linkedin+company"}
+2026-03-16T11:02:33.385+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=PHARMAGEST+INTERACTIVE+official+website+linkedin"}
+2026-03-16T11:02:33.391+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/pharmagest-interactive"}
+2026-03-16T11:02:34.431+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=NDP+DISTRIBUTION+NEUVILLE-DE-POITOU+official+website"}
+2026-03-16T11:02:36.432+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=NDP+DISTRIBUTION+NEUVILLE-DE-POITOU+linkedin+company"}
+2026-03-16T11:02:38.433+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=NDP+DISTRIBUTION+official+website+linkedin"}
+2026-03-16T11:02:38.439+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/ndp-distribution"}
+2026-03-16T11:02:39.491+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CHRISLIS+JARDRES+official+website"}
+2026-03-16T11:02:41.491+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CHRISLIS+JARDRES+linkedin+company"}
+2026-03-16T11:02:43.493+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=CHRISLIS+official+website+linkedin"}
+2026-03-16T11:02:43.495+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/chrislis"}
+2026-03-16T11:02:44.564+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=EASYDIS+MONTMORILLON+official+website"}
+2026-03-16T11:02:46.565+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=EASYDIS+MONTMORILLON+linkedin+company"}
+2026-03-16T11:02:48.565+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=EASYDIS+official+website+linkedin"}
+2026-03-16T11:02:48.600+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/easydis"}
+2026-03-16T11:32:16.859+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026-03-16T11:32:16.993+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=MICRO+TECH+INFORMATIQUE+POITIERS+official+website"}
+2026-03-16T11:32:18.994+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=MICRO+TECH+INFORMATIQUE+POITIERS+linkedin+company"}
+2026-03-16T11:32:20.995+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/?q=MICRO+TECH+INFORMATIQUE+official+website+linkedin"}
+2026/03/16 11:32:20 LinkedIn Guessing: MICRO TECH INFORMATIQUE -> https://www.linkedin.com/company/micro-tech-informatique
+2026-03-16T11:32:21.029+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/micro-tech-informatique"}
+2026-03-16T15:57:35.392+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026-03-16T15:57:45.363+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/etablissement-francais-du-sang/"}
+2026/03/16 15:57:45 low quality fetch for https://www.linkedin.com/company/etablissement-francais-du-sang/ (0.00), retrying with website
+2026/03/16 15:58:47 Primary LLM provider failed, trying fallback gemini_cli: Post "https://openrouter.ai/api/v1/chat/completions": context deadline exceeded (Client.Timeout exceeded while awaiting headers)
+2026-03-16T15:59:46.463+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/etablissement-francais-du-sang/people/"}
+2026-03-16T16:10:38.031+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/16 16:10:46 Fetched https://www.bonilait-proteines.com/: quality 1.00 via http
+2026-03-16T16:19:24.618+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/16 16:19:41 DEBUG [UNION DEP ASSOCIATIONS FAMILIALES VIENNE]: Gemini discovery success: website=https://www.udaf86.fr/, linkedin=
+2026/03/16 16:19:41 Fetched https://www.udaf86.fr/: quality 1.00 via http
+2026/03/16 16:19:55 DEBUG [UNION DEP ASSOCIATIONS FAMILIALES VIENNE]: No LinkedIn URL available, cannot search for individuals
+2026-03-16T16:25:27.530+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/16 16:25:52 DEBUG [AUDACIA POLE MIGRANT]: Gemini discovery success: website=https://www.audacia-asso.fr, linkedin=
+2026-03-16T16:26:22.600+0100	WARN	primary fetcher failed, trying fallback	{"error": "Get \"https://www.audacia-asso.fr\": context deadline exceeded (Client.Timeout exceeded while awaiting headers)", "url": "https://www.audacia-asso.fr"}
+2026/03/16 16:26:22 DEBUG [AUDACIA POLE MIGRANT]: Fetch failed or quality too low (0.00) for both LinkedIn and Website
+2026/03/16 16:26:30 DEBUG [AIGLE INTERNATIONAL]: Gemini discovery success: website=https://www.aigle.com/, linkedin=https://www.linkedin.com/company/aigle/
+2026-03-16T16:26:30.887+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/aigle/"}
+2026/03/16 16:26:30 low quality fetch for https://www.linkedin.com/company/aigle/ (0.00), retrying with website
+2026-03-16T16:26:35.317+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/aigle/people/"}
+2026/03/16 16:27:03 DEBUG [AUTOLIV-ISODELTA]: Gemini discovery failed or empty (err: no JSON found in gemini response). Falling back to DDG...
+2026-03-16T16:27:03.761+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=AUTOLIV-ISODELTA+CHIRE-EN-MONTREUIL+linkedin+company"}
+2026/03/16 16:27:03 DEBUG [AUTOLIV-ISODELTA]: DDG discovery result: website=, linkedin=
+2026/03/16 16:27:03 DEBUG [AUTOLIV-ISODELTA]: No target URL (LinkedIn or Website) found after discovery
+2026/03/16 16:27:06 DEBUG [SERLI]: Gemini discovery failed or empty (err: Model gemini-2.5-flash returned error status 503). Falling back to DDG...
+2026-03-16T16:27:06.014+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=SERLI+CHASSENEUIL-DU-POITOU+linkedin+company"}
+2026/03/16 16:27:06 DEBUG [SERLI]: DDG discovery result: website=, linkedin=
+2026/03/16 16:27:06 DEBUG [SERLI]: No target URL (LinkedIn or Website) found after discovery
+2026/03/16 16:27:15 DEBUG [VALEO SYSTEMES D ESSUYAGE]: Gemini discovery success: website=https://www.valeo.com/, linkedin=https://www.linkedin.com/company/valeo
+2026-03-16T16:27:15.601+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/valeo"}
+2026/03/16 16:27:15 low quality fetch for https://www.linkedin.com/company/valeo (0.00), retrying with website
+2026-03-16T16:27:16.873+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/valeo/people/"}
+2026/03/16 16:27:28 DEBUG [SAE CLINIQUE DU FIEF DE GRIMOIRE]: Gemini discovery success: website=https://www.elsan.care/fr/clinique-du-fief-de-grimoire, linkedin=https://www.linkedin.com/company/elsan/
+2026-03-16T16:27:28.037+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/elsan/"}
+2026/03/16 16:27:28 low quality fetch for https://www.linkedin.com/company/elsan/ (0.00), retrying with website
+2026-03-16T16:27:28.540+0100	WARN	primary fetcher failed, trying fallback	{"error": "HTTP error: 404 404 Not Found", "url": "https://www.elsan.care/fr/clinique-du-fief-de-grimoire"}
+2026/03/16 16:27:28 DEBUG [SAE CLINIQUE DU FIEF DE GRIMOIRE]: Fetch failed or quality too low (0.00) for both LinkedIn and Website
+2026/03/16 16:27:34 DEBUG [SCHNEIDER ELECTRIC FRANCE]: Gemini discovery success: website=https://www.se.com/fr/fr/, linkedin=https://www.linkedin.com/company/schneider-electric/
+2026-03-16T16:27:34.893+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/schneider-electric/"}
+2026/03/16 16:27:34 low quality fetch for https://www.linkedin.com/company/schneider-electric/ (0.00), retrying with website
+2026-03-16T16:27:41.528+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/schneider-electric/people/"}
+2026/03/16 16:27:54 DEBUG [REGIE DES TRANSPORTS POITEVINS]: Gemini discovery success: website=https://www.vitalis-poitiers.fr, linkedin=
+2026/03/16 16:27:58 Fetched https://www.vitalis-poitiers.fr: quality 1.00 via http
+2026/03/16 16:28:25 DEBUG [REGIE DES TRANSPORTS POITEVINS]: No LinkedIn URL available, cannot search for individuals
+2026/03/16 16:28:51 DEBUG [KRAMP FRANCE]: Gemini discovery failed or empty (err: Model gemini-2.5-flash returned error status 503). Falling back to DDG...
+2026-03-16T16:28:51.647+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=KRAMP+FRANCE+POITIERS+linkedin+company"}
+2026/03/16 16:28:51 DEBUG [KRAMP FRANCE]: DDG discovery result: website=, linkedin=
+2026/03/16 16:28:51 DEBUG [KRAMP FRANCE]: No target URL (LinkedIn or Website) found after discovery
+2026/03/16 16:29:02 DEBUG [INSECO]: Gemini discovery success: website=https://www.inseco.fr, linkedin=https://www.linkedin.com/company/inseco-sas/
+2026-03-16T16:29:02.143+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/inseco-sas/"}
+2026/03/16 16:29:02 low quality fetch for https://www.linkedin.com/company/inseco-sas/ (0.00), retrying with website
+2026-03-16T16:29:04.539+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/inseco-sas/people/"}
+2026/03/16 16:29:21 DEBUG [ESI POITIERS]: Gemini discovery success: website=https://www.eesi.eu, linkedin=
+2026-03-16T16:29:22.365+0100	INFO	primary quality too low, trying fallback	{"quality": 0, "url": "https://www.eesi.eu"}
+2026/03/16 16:29:22 DEBUG [ESI POITIERS]: Fetch failed or quality too low (0.00) for both LinkedIn and Website
+2026/03/16 16:29:41 DEBUG [CMA FORMATION SAINT-BENOIT]: Gemini discovery success: website=https://formation.cma-nouvelleaquitaine.fr/nos-centres-de-formation/saint-benoit, linkedin=https://fr.linkedin.com/company/cma-nouvelle-aquitaine
+2026-03-16T16:29:41.800+0100	INFO	forcing browser for domain	{"url": "https://fr.linkedin.com/company/cma-nouvelle-aquitaine"}
+2026/03/16 16:29:41 low quality fetch for https://fr.linkedin.com/company/cma-nouvelle-aquitaine (0.00), retrying with website
+2026-03-16T16:29:56.709+0100	INFO	forcing browser for domain	{"url": "https://fr.linkedin.com/company/cma-nouvelle-aquitaine/people/"}
+2026/03/16 16:30:36 DEBUG [DIRECTION DEPARTEMENTALE DE L'EMPLOI, DU TRAVAIL ET DES SOLIDARITES VIENNE]: Gemini discovery success: website=https://www.vienne.gouv.fr, linkedin=
+2026/03/16 16:30:37 Fetched https://www.vienne.gouv.fr: quality 0.70 via http
+2026/03/16 16:31:23 DEBUG [DIRECTION DEPARTEMENTALE DE L'EMPLOI, DU TRAVAIL ET DES SOLIDARITES VIENNE]: No LinkedIn URL available, cannot search for individuals
+2026/03/16 16:31:26 DEBUG [CRS 18]: Gemini discovery failed or empty (err: Model gemini-2.5-flash returned error status 503). Falling back to DDG...
+2026-03-16T16:31:26.830+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=CRS+18+POITIERS+linkedin+company"}
+2026/03/16 16:31:26 DEBUG [CRS 18]: DDG discovery result: website=, linkedin=
+2026/03/16 16:31:26 DEBUG [CRS 18]: No target URL (LinkedIn or Website) found after discovery
+2026/03/16 16:31:43 DEBUG [TRIBUNAL JUDICIAIRE]: Gemini discovery success: website=https://www.justice.fr/annuaire/tribunaux-judiciaires/tribunal-judiciaire-de-poitiers, linkedin=
+2026-03-16T16:31:43.725+0100	WARN	primary fetcher failed, trying fallback	{"error": "HTTP error: 404 404 Not Found", "url": "https://www.justice.fr/annuaire/tribunaux-judiciaires/tribunal-judiciaire-de-poitiers"}
+2026/03/16 16:31:43 DEBUG [TRIBUNAL JUDICIAIRE]: Fetch failed or quality too low (0.00) for both LinkedIn and Website
+2026/03/16 16:31:48 DEBUG [RESEAU CANOPE]: Gemini discovery failed or empty (err: Model gemini-2.5-flash returned error status 503). Falling back to DDG...
+2026-03-16T16:31:48.948+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=RESEAU+CANOPE+CHASSENEUIL-DU-POITOU+linkedin+company"}
+2026/03/16 16:31:48 DEBUG [RESEAU CANOPE]: DDG discovery result: website=, linkedin=
+2026/03/16 16:31:48 DEBUG [RESEAU CANOPE]: No target URL (LinkedIn or Website) found after discovery
+2026/03/16 16:32:22 DEBUG [INRAE NA-POITIERS LUSIGNAN]: Gemini discovery success: website=https://www.inrae.fr/centres/nouvelle-aquitaine-poitiers, linkedin=https://www.linkedin.com/company/inrae/
+2026-03-16T16:32:22.090+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/inrae/"}
+2026/03/16 16:32:22 low quality fetch for https://www.linkedin.com/company/inrae/ (0.00), retrying with website
+2026-03-16T16:32:25.950+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/inrae/people/"}
+2026/03/16 16:32:31 DEBUG [CENTRE NATIONAL DE LA RECHERCHE SCIENTIFIQUE]: Gemini discovery success: website=https://www.cnrs.fr, linkedin=https://www.linkedin.com/company/cnrs/
+2026-03-16T16:32:31.700+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/cnrs/"}
+2026/03/16 16:32:31 low quality fetch for https://www.linkedin.com/company/cnrs/ (0.00), retrying with website
+2026-03-16T16:32:50.826+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/cnrs/people/"}
+2026/03/16 16:34:22 DEBUG [CENTRE FORMATION APPRENTIS ACADEMIQUE]: Gemini discovery failed or empty (err: Rate limit hit for gemini-2.5-flash. Retry after 60.00s). Falling back to DDG...
+2026-03-16T16:34:22.549+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=CENTRE+FORMATION+APPRENTIS+ACADEMIQUE+JAUNAY-MARIGNY+linkedin+company"}
+2026/03/16 16:34:22 DEBUG [CENTRE FORMATION APPRENTIS ACADEMIQUE]: DDG discovery result: website=, linkedin=
+2026/03/16 16:34:22 DEBUG [CENTRE FORMATION APPRENTIS ACADEMIQUE]: No target URL (LinkedIn or Website) found after discovery
+2026/03/16 16:35:54 DEBUG [CNED SITE DE POITIERS]: Gemini discovery failed or empty (err: Rate limit hit for gemini-2.5-flash. Retry after 60.00s). Falling back to DDG...
+2026-03-16T16:35:54.096+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=CNED+SITE+DE+POITIERS+CHASSENEUIL-DU-POITOU+linkedin+company"}
+2026/03/16 16:35:54 DEBUG [CNED SITE DE POITIERS]: DDG discovery result: website=, linkedin=
+2026/03/16 16:35:54 DEBUG [CNED SITE DE POITIERS]: No target URL (LinkedIn or Website) found after discovery
