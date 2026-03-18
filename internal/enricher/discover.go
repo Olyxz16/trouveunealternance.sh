@@ -210,30 +210,17 @@ func (d *URLDiscoverer) SearchPeopleOnLinkedIn(ctx context.Context, comp db.Comp
 
 func (d *URLDiscoverer) discoverPeopleWithGemini(ctx context.Context, comp db.Company, titles []string) ([]IndividualContact, error) {
 	prompt := fmt.Sprintf(
-		"Company: %s\nCity: %s\nTarget Roles: %s\n\nFind the LinkedIn profile URLs of key decision-makers or recruitment contacts (e.g., CTO, HR Manager, Founder) at this company.",
+		"Find up to 5 real recruitment contacts (CTO, HR, Manager) at %s in %s. \n"+
+			"For each person, provide their name, current role, and LinkedIn profile URL. \n\n"+
+			"CRITICAL: You MUST return the data as a JSON object with a 'contacts' field. \n"+
+			"JSON Format Example: {\"contacts\": [{\"name\": \"...\", \"role\": \"...\", \"linkedin_url\": \"...\"}]}\n\n"+
+			"Do NOT include any text before or after the JSON.",
 		comp.Name,
 		comp.City.String,
-		strings.Join(titles, ", "),
 	)
 
-	system := `You are finding recruitment contacts at French companies using search grounding.
-Find up to 5 real people who currently work at the company.
-
-CRITICAL:
-- ONLY return real people found through your search.
-- NEVER return placeholder or generic names (e.g., John Doe, Jane Smith, Mike Smith, Sarah Patel).
-- If you cannot find real individuals, return an empty list.
-
-Return ONLY a JSON object:
-{
-  "contacts": [
-    {"name": "...", "role": "...", "linkedin_url": "https://www.linkedin.com/in/...", "email": ""},
-    ...
-  ]
-}`
-
 	resp, err := d.geminiAPI.CompleteWithSearch(ctx, llm.CompletionRequest{
-		System: system,
+		System: "You are a professional recruitment assistant. You only output valid JSON.",
 		User:   prompt,
 	})
 	if err != nil {
@@ -242,7 +229,23 @@ Return ONLY a JSON object:
 
 	clean := extractJSONFromText(resp.Content)
 	if clean == "" {
-		return nil, fmt.Errorf("no JSON found in gemini people response")
+		log.Printf("DEBUG [%s]: No JSON found in gemini people response. Attempting to convert text to JSON...", comp.Name)
+		// Fallback: ask LLM to convert the text response to JSON
+		fixPrompt := fmt.Sprintf("Convert the following text into a JSON object with a 'contacts' field containing people's name, role, and linkedin_url. If no people are found, return {\"contacts\": []}. \n\nText:\n%s", resp.Content)
+		
+		var fixResult struct {
+			Contacts []IndividualContact `json:"contacts"`
+		}
+		err = d.classifier.llm.CompleteJSON(ctx, llm.CompletionRequest{
+			System: "You are a data converter. Output ONLY valid JSON.",
+			User:   fixPrompt,
+		}, "fix_people_json", "discovery_fix", &fixResult)
+		
+		if err == nil {
+			return fixResult.Contacts, nil
+		}
+		
+		return nil, fmt.Errorf("failed to fix people JSON: %w", err)
 	}
 
 	var result struct {
@@ -258,6 +261,15 @@ Return ONLY a JSON object:
 // extractJSONFromText finds the first {...} block in a text response.
 // Used when JSON mode cannot be enabled (e.g. search grounding active).
 func extractJSONFromText(content string) string {
+	// Try to find markdown code block first
+	if strings.Contains(content, "```json") {
+		parts := strings.Split(content, "```json")
+		if len(parts) > 1 {
+			inner := strings.Split(parts[1], "```")[0]
+			return strings.TrimSpace(inner)
+		}
+	}
+
 	start := strings.Index(content, "{")
 	end := strings.LastIndex(content, "}")
 	if start == -1 || end == -1 || end <= start {

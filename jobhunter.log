@@ -889,3 +889,199 @@ Hook system message: [
 2026-03-18T20:44:26.285+0100	INFO	browser fetching	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+SERLI+CHASSENEUIL-DU-POITOU+%28CTO+OR+Directeur+Technique+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
 2026/03/18 20:44:26 DEBUG [SERLI]: No real contacts found even with external search
 2026/03/18 20:44:26 INFO: Successfully enriched SERLI
+2026/03/18 21:02:45 INFO: Initializing enrichment pipeline...
+2026/03/18 21:02:45 INFO: Connecting to LLM providers...
+2026/03/18 21:02:45 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 21:02:45 INFO: Launching browser instance...
+2026-03-18T21:02:46.302+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 21:02:46 INFO: Browser ready.
+2026/03/18 21:02:46 INFO: Enriching 1 companies...
+2026-03-18T21:02:46.303+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/serli/"}
+2026-03-18T21:02:46.303+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/serli/"}
+2026/03/18 21:02:46 DEBUG [SERLI]: low quality fetch for https://www.linkedin.com/company/serli/ (0.00), retrying with website https://www.serli.com
+2026-03-18T21:02:46.303+0100	INFO	cache hit	{"url": "https://www.serli.com"}
+2026/03/18 21:02:46 DEBUG [SERLI]: Website retry result: quality 1.00 via cache
+2026/03/18 21:02:46 DEBUG [SERLI]: Extracting company info from content (length: 1391)
+2026/03/18 21:02:57 DEBUG [SERLI]: Company info extracted: Type=TECH, TechStack=[]
+2026/03/18 21:02:57 DEBUG [SERLI]: Fetching people from https://www.linkedin.com/company/serli/people/ (with scroll)
+2026-03-18T21:02:57.275+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/serli/people/", "scrolls": 3}
+2026-03-18T21:02:57.275+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/serli/people/"}
+2026/03/18 21:02:57 DEBUG [SERLI]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/serli/people/: context canceled
+2026/03/18 21:02:57 DEBUG [SERLI]: Retrying contact search on website https://www.serli.com
+2026-03-18T21:02:57.275+0100	INFO	cache hit	{"url": "https://www.serli.com"}
+2026/03/18 21:02:57 DEBUG [SERLI]: Contact page fetched: quality 1.00, length 1391 via cache
+2026/03/18 21:02:59 DEBUG [SERLI]: ExtractPeopleFromPage result: count=0, err=<nil>
+2026/03/18 21:02:59 DEBUG [SERLI]: No real contacts found on page, trying external search
+2026/03/18 21:02:59 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 21:03:47 DEBUG [SERLI]: No JSON found in gemini people response. Raw response: Here are up to 5 real people who currently work at SERLI, along with their roles and LinkedIn profile URLs.
+
+*   **Jérôme Petit**
+    *   Role: Managing Director (Dirigeant)
+    *   LinkedIn URL: https://www.linkedin.com/in/jerome-petit-45b0a312
+    *   Email: (Not found in public search results)
+*   **Orianne Tisseuil**
+    *   Role: Commercial Director / Associate Commercial Director (Directrice Commerciale Associée), Co-Director (Co-dirigeant)
+    *   LinkedIn URL: https://www.linkedin.com/in/orianne-tisseuil-a620b723
+    *   Email: orianne.tisseuil@serli.com
+*   **Anne Roquain**
+    *   Role: Communication Director (Responsable Communication)
+    *   LinkedIn URL: https://www.linkedin.com/in/anne-roquain-b2234024
+    *   Email: (Not found in public search results)
+*   **Mathieu Ancelin**
+    *   Role: Developer, CTO & Co-Founder @ Cloud APIM (dev @Serli)
+    *   LinkedIn URL: https://www.linkedin.com/in/mathieuancelin
+    *   Email: (Not found in public search results)
+
+While searches were conducted for CTO, Directeur Technique, DevOps, and Engineering Manager, the results provided the above individuals with clearly defined, current roles at SERLI that align with decision-making or recruitment contact points. Jérôme Petit holds a top leadership position, and Mathieu Ancelin holds a senior technical role at SERLI. Orianne Tisseuil and Anne Roquain are actively involved in recruitment and communication for the company.
+2026/03/18 21:03:47 DEBUG [SERLI]: Gemini people discovery failed or empty (err: no JSON found in gemini people response). Falling back to DDG...
+2026-03-18T21:03:47.557+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+SERLI+CHASSENEUIL-DU-POITOU+%28CTO+OR+Directeur+Technique+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026-03-18T21:03:47.557+0100	INFO	browser fetching	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+SERLI+CHASSENEUIL-DU-POITOU+%28CTO+OR+Directeur+Technique+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026/03/18 21:03:47 DEBUG [SERLI]: No real contacts found even with external search
+2026/03/18 21:03:47 INFO: Successfully enriched SERLI
+2026/03/18 21:07:46 INFO: Initializing enrichment pipeline...
+2026/03/18 21:07:46 INFO: Connecting to LLM providers...
+2026/03/18 21:07:46 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 21:07:46 INFO: Launching browser instance...
+2026-03-18T21:07:47.679+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 21:07:47 INFO: Browser ready.
+2026/03/18 21:07:47 INFO: Enriching 1 companies...
+2026-03-18T21:07:47.680+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/serli/"}
+2026-03-18T21:07:47.680+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/serli/"}
+2026/03/18 21:07:47 DEBUG [SERLI]: low quality fetch for https://www.linkedin.com/company/serli/ (0.00), retrying with website https://www.serli.com
+2026-03-18T21:07:47.681+0100	INFO	cache hit	{"url": "https://www.serli.com"}
+2026/03/18 21:07:47 DEBUG [SERLI]: Website retry result: quality 1.00 via cache
+2026/03/18 21:07:47 DEBUG [SERLI]: Extracting company info from content (length: 1391)
+2026/03/18 21:07:50 DEBUG [SERLI]: Company info extracted: Type=TECH, TechStack=[]
+2026/03/18 21:07:50 DEBUG [SERLI]: Fetching people from https://www.linkedin.com/company/serli/people/ (with scroll)
+2026-03-18T21:07:50.653+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/serli/people/", "scrolls": 3}
+2026-03-18T21:07:50.653+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/serli/people/"}
+2026/03/18 21:07:50 DEBUG [SERLI]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/serli/people/: context canceled
+2026/03/18 21:07:50 DEBUG [SERLI]: Retrying contact search on website https://www.serli.com
+2026-03-18T21:07:50.654+0100	INFO	cache hit	{"url": "https://www.serli.com"}
+2026/03/18 21:07:50 DEBUG [SERLI]: Contact page fetched: quality 1.00, length 1391 via cache
+2026/03/18 21:07:52 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/18 21:07:55 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/18 21:07:58 DEBUG [SERLI]: ExtractPeopleFromPage result: count=0, err=<nil>
+2026/03/18 21:07:58 DEBUG [SERLI]: No real contacts found on page, trying external search
+2026/03/18 21:07:58 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 21:08:21 DEBUG [SERLI]: Gemini people discovery success: found 5 contacts
+2026/03/18 21:08:21 Found 5 candidates for SERLI
+2026-03-18T21:08:21.335+0100	INFO	forcing browser for domain	{"url": "https://fr.linkedin.com/in/jeromepetit"}
+2026-03-18T21:08:21.335+0100	INFO	browser fetching	{"url": "https://fr.linkedin.com/in/jeromepetit"}
+2026-03-18T21:08:21.335+0100	INFO	forcing browser for domain	{"url": "https://fr.linkedin.com/in/wilfriedfournier"}
+2026-03-18T21:08:21.335+0100	INFO	browser fetching	{"url": "https://fr.linkedin.com/in/wilfriedfournier"}
+2026-03-18T21:08:21.335+0100	INFO	forcing browser for domain	{"url": "https://fr.linkedin.com/in/marine-droit-667341a9"}
+2026-03-18T21:08:21.335+0100	INFO	browser fetching	{"url": "https://fr.linkedin.com/in/marine-droit-667341a9"}
+2026/03/18 21:08:23 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/18 21:08:25 Primary LLM openrouter failed (attempt 2/4), retrying in 2s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/18 21:08:28 Primary LLM openrouter failed (attempt 3/4), retrying in 4s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/18 21:08:33 Primary LLM provider failed, trying fallback gemini_cli: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/18 21:08:52 Best contact for SERLI: Wilfried Fournier (Directeur Technique)
+2026/03/18 21:08:52 INFO: Successfully enriched SERLI
+2026/03/18 21:09:33 INFO: Initializing enrichment pipeline...
+2026/03/18 21:09:33 INFO: Connecting to LLM providers...
+2026/03/18 21:09:33 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 21:09:33 INFO: Launching browser instance...
+2026-03-18T21:09:34.340+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 21:09:34 INFO: Browser ready.
+2026/03/18 21:09:34 INFO: Enriching 1 companies...
+2026-03-18T21:09:34.341+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/inseco"}
+2026-03-18T21:09:34.341+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/inseco"}
+2026/03/18 21:09:34 DEBUG [INSECO]: low quality fetch for https://www.linkedin.com/company/inseco (0.00), retrying with website https://inseco.com
+2026-03-18T21:09:34.342+0100	INFO	cache hit	{"url": "https://inseco.com"}
+2026/03/18 21:09:34 DEBUG [INSECO]: Website retry result: quality 0.70 via cache
+2026/03/18 21:09:34 DEBUG [INSECO]: Extracting company info from content (length: 543)
+2026/03/18 21:09:37 Primary LLM openrouter failed (attempt 1/4), retrying in 1s: Rate limit hit for openrouter/free. Retry after 0.00s
+2026/03/18 21:09:43 DEBUG [INSECO]: Company info extracted: Type=NON_TECH, TechStack=[]
+2026/03/18 21:09:43 DEBUG [INSECO]: Fetching people from https://www.linkedin.com/company/inseco/people/ (with scroll)
+2026-03-18T21:09:43.600+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/inseco/people/", "scrolls": 3}
+2026-03-18T21:09:43.600+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/inseco/people/"}
+2026/03/18 21:09:43 DEBUG [INSECO]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/inseco/people/: context canceled
+2026/03/18 21:09:43 DEBUG [INSECO]: Retrying contact search on website https://inseco.com
+2026-03-18T21:09:43.601+0100	INFO	cache hit	{"url": "https://inseco.com"}
+2026/03/18 21:09:43 DEBUG [INSECO]: Contact page fetched: quality 0.70, length 543 via cache
+2026/03/18 21:09:45 DEBUG [INSECO]: ExtractPeopleFromPage result: count=0, err=<nil>
+2026/03/18 21:09:45 DEBUG [INSECO]: No real contacts found on page, trying external search
+2026/03/18 21:09:45 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 21:10:05 DEBUG [INSECO]: Gemini people discovery failed or empty (err: <nil>). Falling back to DDG...
+2026-03-18T21:10:05.374+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+INSECO+POITIERS+%28CTO+OR+Directeur+Technique+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026-03-18T21:10:05.374+0100	INFO	browser fetching	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+INSECO+POITIERS+%28CTO+OR+Directeur+Technique+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026/03/18 21:10:05 DEBUG [INSECO]: No real contacts found even with external search
+2026/03/18 21:10:05 INFO: Successfully enriched INSECO
+2026/03/18 21:10:16 INFO: Initializing enrichment pipeline...
+2026/03/18 21:10:16 INFO: Connecting to LLM providers...
+2026/03/18 21:10:16 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 21:10:16 INFO: Launching browser instance...
+2026-03-18T21:10:17.707+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 21:10:17 INFO: Browser ready.
+2026/03/18 21:10:17 INFO: Enriching 1 companies...
+2026-03-18T21:10:17.707+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/valeo"}
+2026-03-18T21:10:17.708+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/valeo"}
+2026/03/18 21:10:17 DEBUG [VALEO SYSTEMES D ESSUYAGE]: low quality fetch for https://www.linkedin.com/company/valeo (0.00), retrying with website https://www.valeo.com/
+2026/03/18 21:10:18 DEBUG [VALEO SYSTEMES D ESSUYAGE]: Website retry result: quality 1.00 via http
+2026/03/18 21:10:18 DEBUG [VALEO SYSTEMES D ESSUYAGE]: Extracting company info from content (length: 2789)
+2026/03/18 21:10:35 DEBUG [VALEO SYSTEMES D ESSUYAGE]: Company info extracted: Type=TECH_ADJACENT, TechStack=[]
+2026/03/18 21:10:35 DEBUG [VALEO SYSTEMES D ESSUYAGE]: Fetching people from https://www.linkedin.com/company/valeo/people/ (with scroll)
+2026-03-18T21:10:35.572+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/valeo/people/", "scrolls": 3}
+2026-03-18T21:10:35.572+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/valeo/people/"}
+2026/03/18 21:10:35 DEBUG [VALEO SYSTEMES D ESSUYAGE]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/valeo/people/: context canceled
+2026/03/18 21:10:35 DEBUG [VALEO SYSTEMES D ESSUYAGE]: Retrying contact search on website https://www.valeo.com/
+2026-03-18T21:10:35.572+0100	INFO	cache hit	{"url": "https://www.valeo.com/"}
+2026/03/18 21:10:35 DEBUG [VALEO SYSTEMES D ESSUYAGE]: Contact page fetched: quality 1.00, length 2789 via cache
+2026/03/18 21:10:43 DEBUG [VALEO SYSTEMES D ESSUYAGE]: ExtractPeopleFromPage result: count=0, err=<nil>
+2026/03/18 21:10:43 DEBUG [VALEO SYSTEMES D ESSUYAGE]: No real contacts found on page, trying external search
+2026/03/18 21:10:43 Gemini API call (model=gemini-2.5-flash, withSearch=true)
+2026/03/18 21:10:43 DEBUG [VALEO SYSTEMES D ESSUYAGE]: Gemini people discovery failed or empty (err: Rate limit hit for gemini-2.5-flash. Retry after 60.00s). Falling back to DDG...
+2026-03-18T21:10:43.311+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+VALEO+SYSTEMES+D+ESSUYAGE+CHATELLERAULT+%28CTO+OR+Directeur+Technique+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026-03-18T21:10:43.311+0100	INFO	browser fetching	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+VALEO+SYSTEMES+D+ESSUYAGE+CHATELLERAULT+%28CTO+OR+Directeur+Technique+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026/03/18 21:10:43 DEBUG [VALEO SYSTEMES D ESSUYAGE]: No real contacts found even with external search
+2026/03/18 21:10:43 INFO: Successfully enriched VALEO SYSTEMES D ESSUYAGE
+2026/03/18 21:11:32 INFO: Initializing enrichment pipeline...
+2026/03/18 21:11:32 INFO: Connecting to LLM providers...
+2026/03/18 21:11:32 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 21:11:32 INFO: Launching browser instance...
+2026-03-18T21:11:33.665+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 21:11:33 INFO: Browser ready.
+2026/03/18 21:11:33 INFO: Enriching 1 companies...
+2026-03-18T21:11:33.666+0100	INFO	forcing browser for domain	{"url": "https://www.linkedin.com/company/valeo"}
+2026-03-18T21:11:33.666+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/valeo"}
+2026/03/18 21:11:33 DEBUG [VALEO SYSTEMES D ESSUYAGE]: low quality fetch for https://www.linkedin.com/company/valeo (0.00), retrying with website https://www.valeo.com
+2026/03/18 21:11:33 DEBUG [VALEO SYSTEMES D ESSUYAGE]: Website retry result: quality 1.00 via http
+2026/03/18 21:11:33 DEBUG [VALEO SYSTEMES D ESSUYAGE]: Extracting company info from content (length: 5961)
+2026/03/18 21:11:48 DEBUG [VALEO SYSTEMES D ESSUYAGE]: Company info extracted: Type=TECH, TechStack=[]
+2026/03/18 21:11:48 DEBUG [VALEO SYSTEMES D ESSUYAGE]: Fetching people from https://www.linkedin.com/company/valeo/people/ (with scroll)
+2026-03-18T21:11:48.736+0100	INFO	scrolling and fetching	{"url": "https://www.linkedin.com/company/valeo/people/", "scrolls": 3}
+2026-03-18T21:11:48.736+0100	INFO	browser fetching	{"url": "https://www.linkedin.com/company/valeo/people/"}
+2026/03/18 21:11:48 DEBUG [VALEO SYSTEMES D ESSUYAGE]: People fetch failed: browser fetch failed for https://www.linkedin.com/company/valeo/people/: context canceled
+2026/03/18 21:11:48 DEBUG [VALEO SYSTEMES D ESSUYAGE]: Retrying contact search on website https://www.valeo.com
+2026-03-18T21:11:48.736+0100	INFO	cache hit	{"url": "https://www.valeo.com"}
+2026/03/18 21:11:48 DEBUG [VALEO SYSTEMES D ESSUYAGE]: Contact page fetched: quality 1.00, length 5961 via cache
+2026/03/18 21:11:50 DEBUG [VALEO SYSTEMES D ESSUYAGE]: ExtractPeopleFromPage result: count=0, err=<nil>
+2026/03/18 21:11:50 DEBUG [VALEO SYSTEMES D ESSUYAGE]: No real contacts found on page, trying external search
+2026/03/18 21:11:50 Gemini API call (model=gemini-2.5-flash, withSearch=true, attempt=1/3)
+2026/03/18 21:11:50 Gemini Rate Limit hit, retrying in 30s...
+2026/03/18 21:12:20 Gemini API call (model=gemini-2.5-flash, withSearch=true, attempt=2/3)
+2026/03/18 21:12:20 Gemini Rate Limit hit, retrying in 1m0s...
+2026/03/18 21:13:20 Gemini API call (model=gemini-2.5-flash, withSearch=true, attempt=3/3)
+2026/03/18 21:13:20 DEBUG [VALEO SYSTEMES D ESSUYAGE]: Gemini people discovery failed or empty (err: Rate limit hit for gemini-2.5-flash. Retry after 60.00s). Falling back to DDG...
+2026-03-18T21:13:20.651+0100	INFO	forcing browser for domain	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+VALEO+SYSTEMES+D+ESSUYAGE+CHATELLERAULT+%28CTO+OR+Directeur+Technique+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026-03-18T21:13:20.651+0100	INFO	browser fetching	{"url": "https://duckduckgo.com/html/?q=site%3Alinkedin.com%2Fin%2F+VALEO+SYSTEMES+D+ESSUYAGE+CHATELLERAULT+%28CTO+OR+Directeur+Technique+OR+DevOps+OR+Recrutement+OR+RH+OR+Engineering+Manager%29"}
+2026/03/18 21:13:20 DEBUG [VALEO SYSTEMES D ESSUYAGE]: No real contacts found even with external search
+2026/03/18 21:13:20 INFO: Successfully enriched VALEO SYSTEMES D ESSUYAGE
+2026/03/18 21:13:38 INFO: Initializing enrichment pipeline...
+2026/03/18 21:13:38 INFO: Connecting to LLM providers...
+2026/03/18 21:13:38 INFO: Gemini API search grounding enabled for URL discovery
+2026/03/18 21:13:38 INFO: Launching browser instance...
+2026-03-18T21:13:39.394+0100	INFO	browser session loaded	{"cookies": "data/browser_session.json"}
+2026/03/18 21:13:39 INFO: Browser ready.
+2026/03/18 21:13:39 INFO: Enriching 1 companies...
+2026/03/18 21:13:39 Gemini API call (model=gemini-2.5-flash, withSearch=true, attempt=1/3)
+2026/03/18 21:13:39 Gemini Rate Limit hit, retrying in 30s...
+2026/03/18 21:14:09 Gemini API call (model=gemini-2.5-flash, withSearch=true, attempt=2/3)
+2026/03/18 21:14:09 Gemini Rate Limit hit, retrying in 1m0s...
+2026/03/18 21:15:09 Gemini API call (model=gemini-2.5-flash, withSearch=true, attempt=3/3)
+2026/03/18 21:15:40 Gemini API call (model=gemini-2.5-flash, withSearch=true, attempt=1/3)
+2026/03/18 21:15:40 Gemini Rate Limit hit, retrying in 30s...
+2026/03/18 21:16:10 Gemini API call (model=gemini-2.5-flash, withSearch=true, attempt=2/3)
+2026/03/18 21:16:10 Gemini Rate Limit hit, retrying in 1m0s...
+2026/03/18 21:17:10 Gemini API call (model=gemini-2.5-flash, withSearch=true, attempt=3/3)

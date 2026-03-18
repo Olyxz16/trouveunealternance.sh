@@ -262,7 +262,10 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 			Source:      db.ToNullString("linkedin"),
 			Confidence:  db.ToNullString("probable"),
 		}, isPrimary)
-		if err == nil && isPrimary {
+		
+		if err != nil {
+			log.Printf("ERROR [%s]: Failed to save contact %s: %v", comp.Name, candidate.Name, err)
+		} else if isPrimary {
 			primaryContactID = contactID
 		}
 	}
