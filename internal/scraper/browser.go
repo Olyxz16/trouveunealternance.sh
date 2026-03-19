@@ -54,7 +54,8 @@ func NewBrowserFetcher(cookiesPath, display string, headless bool, binaryPath st
 		chromedp.Flag("disable-setuid-sandbox", true), // required in Docker/server
 		chromedp.Flag("disable-dev-shm-usage", true),  // prevents crashes on low-memory servers
 		chromedp.WindowSize(1920, 1080),
-		chromedp.UserAgent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"),
+		// Use a slightly more common/modern user agent
+		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"),
 	)
 
 	if binaryPath != "" {
@@ -105,8 +106,8 @@ func (f *BrowserFetcher) Fetch(ctx context.Context, url string) (string, error) 
 
 	f.logger.Info("browser fetching", zap.String("url", url))
 
-	// Deriving a new context from f.ctx while respecting the timeout/cancellation of ctx
-	runCtx, cancel := chromedp.NewContext(f.ctx)
+	// Deriving a new context from the allocator context
+	runCtx, cancel := chromedp.NewContext(f.allocCtx)
 	defer cancel()
 
 	// Apply timeout from provided ctx if it has one, or default 60s
@@ -147,7 +148,7 @@ func (f *BrowserFetcher) Fetch(ctx context.Context, url string) (string, error) 
 
 // Scroll scrolls the page down to trigger lazy loading.
 func (f *BrowserFetcher) Scroll(ctx context.Context, times int) error {
-	runCtx, cancel := chromedp.NewContext(f.ctx)
+	runCtx, cancel := chromedp.NewContext(f.allocCtx)
 	defer cancel()
 
 	deadline, ok := ctx.Deadline()
@@ -170,6 +171,64 @@ func (f *BrowserFetcher) Scroll(ctx context.Context, times int) error {
 		}
 	}
 	return nil
+}
+
+// FetchWithScroll navigates to url, scrolls down multiple times, and returns the full HTML.
+// This is essential for sites like LinkedIn that lazy-load content.
+func (f *BrowserFetcher) FetchWithScroll(ctx context.Context, url string, scrolls int) (string, error) {
+	var html string
+
+	f.logger.Info("browser fetching with scroll", zap.String("url", url), zap.Int("scrolls", scrolls))
+
+	runCtx, cancel := chromedp.NewContext(f.allocCtx)
+	defer cancel()
+
+	deadline, ok := ctx.Deadline()
+	var timeoutCtx context.Context
+	var timeoutCancel context.CancelFunc
+	if ok {
+		timeoutCtx, timeoutCancel = context.WithDeadline(runCtx, deadline)
+	} else {
+		timeoutCtx, timeoutCancel = context.WithTimeout(runCtx, 150*time.Second)
+	}
+	defer timeoutCancel()
+
+	actions := []chromedp.Action{
+		chromedp.Navigate(url),
+		chromedp.WaitReady("body", chromedp.ByQuery),
+		chromedp.ActionFunc(func(ctx context.Context) error {
+			_ = chromedp.Click(`button[data-control-name="ga-cookie.accept_all"]`, chromedp.ByQuery).Do(ctx)
+			return nil
+		}),
+		chromedp.Sleep(3000 * time.Millisecond),
+		// Random mouse movement
+		chromedp.MouseEvent("mouseMoved", 150, 150),
+	}
+
+	// Add scroll actions with more variance
+	for i := 0; i < scrolls; i++ {
+		actions = append(actions,
+			chromedp.Evaluate(`window.scrollTo(0, document.body.scrollHeight * (0.4 + Math.random()*0.5))`, nil),
+			chromedp.Sleep(time.Duration(2000+i*500)*time.Millisecond),
+			chromedp.MouseEvent("mouseMoved", 200+float64(i)*20, 200+float64(i)*20),
+		)
+	}
+
+	// Final extraction
+	actions = append(actions, chromedp.OuterHTML("html", &html, chromedp.ByQuery))
+
+	err := chromedp.Run(timeoutCtx, actions...)
+	if err != nil {
+		return "", fmt.Errorf("browser fetch with scroll failed for %s: %w", url, err)
+	}
+
+	f.logger.Info("browser fetch with scroll success", zap.String("url", url), zap.Int("html_len", len(html)))
+
+	if err := f.saveCookies(); err != nil {
+		f.logger.Warn("failed to save cookies", zap.Error(err))
+	}
+
+	return html, nil
 }
 
 // Close shuts down the browser gracefully and saves cookies one final time.

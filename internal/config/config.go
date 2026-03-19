@@ -23,8 +23,14 @@ type Config struct {
 	BrowserBinaryPath   string `env:"BROWSER_BINARY_PATH"     envDefault:""`
 	ForceBrowserDomains string `env:"FORCE_BROWSER_DOMAINS"   envDefault:"linkedin.com,duckduckgo.com"`
 	GeminiAPIKey        string `env:"GEMINI_API_KEY"        envDefault:""`
-	GeminiAPIModel      string `env:"GEMINI_API_MODEL"      envDefault:"gemini-2.5-flash"`
+	GeminiAPIModel      string `env:"GEMINI_API_MODEL"      envDefault:"gemini-2.0-flash-lite"`
 }
+
+func (c *Config) GetOpenRouterAPIKey() string { return c.OpenRouterAPIKey }
+func (c *Config) GetOpenRouterModel() string  { return c.OpenRouterModel }
+func (c *Config) GetGeminiAPIKey() string     { return c.GeminiAPIKey }
+func (c *Config) GetGeminiAPIModel() string   { return c.GeminiAPIModel }
+func (c *Config) GetGeminiCLIPath() string    { return c.GeminiCLIPath }
 
 func Load() *Config {
 	_ = godotenv.Load() // ignore error if .env doesn't exist

@@ -116,18 +116,7 @@ var enrichCmd = &cobra.Command{
 
 			// Setup LLM
 			log.Printf("INFO: Connecting to LLM providers...")
-			var primary, fallback llm.Provider
-			if cfg.LLMPrimary == "openrouter" {
-				primary = llm.NewOpenRouterProvider(cfg.OpenRouterAPIKey, cfg.OpenRouterModel)
-			} else {
-				primary = llm.NewGeminiCLIProvider(cfg.GeminiCLIPath)
-			}
-
-			if cfg.LLMFallback == "gemini_cli" {
-				fallback = llm.NewGeminiCLIProvider(cfg.GeminiCLIPath)
-			} else if cfg.LLMFallback == "openrouter" {
-				fallback = llm.NewOpenRouterProvider(cfg.OpenRouterAPIKey, cfg.OpenRouterModel)
-			}
+			primary, fallback := llm.InitProviders(cfg.LLMPrimary, cfg.LLMFallback, cfg)
 
 			llmClient := llm.NewClient(primary, fallback, cfg.OpenRouterRPM, database)
 			classifier := enricher.NewClassifier(llmClient, database)

@@ -179,6 +179,8 @@ func guessLinkedInSlug(name string) string {
 }
 
 func (d *URLDiscoverer) SearchPeopleOnLinkedIn(ctx context.Context, comp db.Company, titles []string) ([]IndividualContact, error) {
+	log.Printf("DEBUG [%s]: Searching for people on LinkedIn...", comp.Name)
+	
 	// 1. Try Gemini Search Grounding first if available
 	if d.geminiAPI != nil {
 		people, err := d.discoverPeopleWithGemini(ctx, comp, titles)
@@ -186,66 +188,95 @@ func (d *URLDiscoverer) SearchPeopleOnLinkedIn(ctx context.Context, comp db.Comp
 			log.Printf("DEBUG [%s]: Gemini people discovery success: found %d contacts", comp.Name, len(people))
 			return people, nil
 		}
-		log.Printf("DEBUG [%s]: Gemini people discovery failed or empty (err: %v). Falling back to DDG...", comp.Name, err)
+		log.Printf("DEBUG [%s]: Gemini people discovery failed or empty (err: %v).", comp.Name, err)
 	}
 
-	// 2. Fallback to DDG search
-	// titles like "CTO", "HR", "DevOps"
-	query := fmt.Sprintf("site:linkedin.com/in/ %s %s (%s)", comp.Name, comp.City.String, strings.Join(titles, " OR "))
-	searchURL := fmt.Sprintf("https://duckduckgo.com/html/?q=%s", url.QueryEscape(query))
-
-	res, err := d.fetcher.Fetch(ctx, searchURL)
-	if err != nil {
-		return nil, err
+	// 2. Fallback to multiple DDG searches with different queries
+	queries := []string{
+		fmt.Sprintf("site:linkedin.com/in/ %s Poitiers (%s)", comp.Name, strings.Join(titles, " OR ")),
+		fmt.Sprintf("site:linkedin.com/in/ %s (%s)", comp.Name, strings.Join(titles, " OR ")),
 	}
 
-	// Use the classifier to extract individual profiles from search result markdown
-	people, err := d.classifier.ExtractPeopleFromSearchResults(ctx, res.ContentMD, "linkedin_search_people")
-	if err != nil {
-		return nil, err
+	var allContacts []IndividualContact
+	seenURLs := make(map[string]bool)
+
+	for i, query := range queries {
+		log.Printf("DEBUG [%s]: DDG query %d: %s", comp.Name, i+1, query)
+		searchURL := fmt.Sprintf("https://duckduckgo.com/html/?q=%s", url.QueryEscape(query))
+
+		// Use a dedicated timeout for each search attempt
+		searchCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+		res, err := d.fetcher.ScrollAndFetch(searchCtx, searchURL, 0)
+		cancel()
+
+		if err != nil {
+			log.Printf("DEBUG [%s]: DDG query %d failed: %v", comp.Name, i+1, err)
+			continue
+		}
+
+		people, err := d.classifier.ExtractPeopleFromSearchResults(ctx, res.ContentMD, "linkedin_search_people")
+		if err == nil {
+			for _, c := range people.Contacts {
+				if !seenURLs[c.LinkedinURL] && c.LinkedinURL != "" {
+					allContacts = append(allContacts, c)
+					seenURLs[c.LinkedinURL] = true
+				}
+			}
+		}
+		
+		if len(allContacts) >= 3 {
+			break // found enough
+		}
 	}
 
-	return people.Contacts, nil
+	return allContacts, nil
 }
 
 func (d *URLDiscoverer) discoverPeopleWithGemini(ctx context.Context, comp db.Company, titles []string) ([]IndividualContact, error) {
+	city := comp.City.String
+	if city == "" || city == "CHASSENEUIL-DU-POITOU" {
+		city = "Poitiers"
+	}
+
 	prompt := fmt.Sprintf(
-		"Find up to 5 real recruitment contacts (CTO, HR, Manager) at %s in %s. \n"+
-			"For each person, provide their name, current role, and LinkedIn profile URL. \n\n"+
-			"CRITICAL: You MUST return the data as a JSON object with a 'contacts' field. \n"+
-			"JSON Format Example: {\"contacts\": [{\"name\": \"...\", \"role\": \"...\", \"linkedin_url\": \"...\"}]}\n\n"+
-			"Do NOT include any text before or after the JSON.",
+		"I need to find recruitment contacts, technical managers, or founders at the company '%s' near '%s', France.\n\n"+
+			"Search for real people and return their details. \n"+
+			"Include their full name, job title, and absolute LinkedIn profile URL (https://www.linkedin.com/in/...).\n"+
+			"If you find a personal work email, include it as well.\n\n"+
+			"Return ONLY a JSON object: \n"+
+			"{\"contacts\": [{\"name\": \"...\", \"role\": \"...\", \"linkedin_url\": \"...\", \"email\": \"...\"}]}",
 		comp.Name,
-		comp.City.String,
+		city,
 	)
 
 	resp, err := d.geminiAPI.CompleteWithSearch(ctx, llm.CompletionRequest{
-		System: "You are a professional recruitment assistant. You only output valid JSON.",
+		System: "You are a helpful recruitment research assistant. You provide data in JSON format.",
 		User:   prompt,
 	})
 	if err != nil {
 		return nil, err
 	}
 
+	log.Printf("DEBUG [%s]: Gemini People Discovery raw response: %s", comp.Name, resp.Content)
+
 	clean := extractJSONFromText(resp.Content)
 	if clean == "" {
-		log.Printf("DEBUG [%s]: No JSON found in gemini people response. Attempting to convert text to JSON...", comp.Name)
-		// Fallback: ask LLM to convert the text response to JSON
-		fixPrompt := fmt.Sprintf("Convert the following text into a JSON object with a 'contacts' field containing people's name, role, and linkedin_url. If no people are found, return {\"contacts\": []}. \n\nText:\n%s", resp.Content)
+		log.Printf("DEBUG [%s]: No JSON found in gemini response. Raw: %s", comp.Name, resp.Content)
 		
+		// Attempt fallback conversion
+		fixPrompt := fmt.Sprintf("Extract the people information from the following text into a JSON object with a 'contacts' field. Each contact MUST have name, role, and linkedin_url. If a linkedin_url is missing for a person, DO NOT include that person. \n\nText:\n%s", resp.Content)
 		var fixResult struct {
 			Contacts []IndividualContact `json:"contacts"`
 		}
 		err = d.classifier.llm.CompleteJSON(ctx, llm.CompletionRequest{
-			System: "You are a data converter. Output ONLY valid JSON.",
+			System: "Output ONLY JSON.",
 			User:   fixPrompt,
 		}, "fix_people_json", "discovery_fix", &fixResult)
 		
 		if err == nil {
 			return fixResult.Contacts, nil
 		}
-		
-		return nil, fmt.Errorf("failed to fix people JSON: %w", err)
+		return nil, fmt.Errorf("no JSON found and fallback failed: %w", err)
 	}
 
 	var result struct {

@@ -17,6 +17,17 @@ type PipelineRun struct {
 	ErrorCount         int            `json:"error_count"`
 }
 
+type TokenUsage struct {
+	RunID            string  `json:"run_id"`
+	Task             string  `json:"task"`
+	Model            string  `json:"model"`
+	Provider         string  `json:"provider"`
+	PromptTokens     int     `json:"prompt_tokens"`
+	CompletionTokens int     `json:"completion_tokens"`
+	CostUSD          float64 `json:"cost_usd"`
+	IsEstimated      bool    `json:"is_estimated"`
+}
+
 type RunLog struct {
 	ID         int            `json:"id"`
 	RunID      string         `json:"run_id"`
@@ -73,6 +84,17 @@ func (db *DB) InsertGeminiUsage(runID, step string, promptTokens, completionToke
 	return err
 }
 
+func (db *DB) InsertTokenUsage(u *TokenUsage) error {
+	_, err := db.Exec(`
+		INSERT INTO token_usage (
+			run_id, task, model, provider, prompt_tokens, completion_tokens, cost_usd, is_estimated
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+	`,
+		u.RunID, u.Task, u.Model, u.Provider, u.PromptTokens, u.CompletionTokens, u.CostUSD, u.IsEstimated,
+	)
+	return err
+}
+
 func (db *DB) GetRuns(limit int) ([]PipelineRun, error) {
 	rows, err := db.Query(`
 		SELECT run_id, started_at, finished_at, status, companies_processed, contacts_found, drafts_generated, llm_cost_usd, error_count 
@@ -126,24 +148,33 @@ type UsageStats struct {
 
 func (db *DB) GetUsageToday() (UsageStats, error) {
 	var s UsageStats
-	// Combine llm_usage and gemini_usage (estimated)
-	err := db.QueryRow(`
-		SELECT COUNT(*), SUM(prompt_tokens), SUM(completion_tokens), SUM(cost_usd) 
-		FROM llm_usage WHERE ts >= date('now')
+	
+	// 1. Query unified token_usage table
+	_ = db.QueryRow(`
+		SELECT COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0), COALESCE(SUM(cost_usd), 0) 
+		FROM token_usage WHERE ts >= date('now')
 	`).Scan(&s.Requests, &s.PromptTokens, &s.CompletionTokens, &s.TotalCost)
 	
-	// Add gemini estimates
+	// 2. Fallback/Legacy: Add llm_usage and gemini_usage
+	var lReq, lPrompt, lComp int
+	var lCost float64
+	_ = db.QueryRow(`
+		SELECT COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0), COALESCE(SUM(cost_usd), 0) 
+		FROM llm_usage WHERE ts >= date('now')
+	`).Scan(&lReq, &lPrompt, &lComp, &lCost)
+	
 	var gReq, gPrompt, gComp int
 	_ = db.QueryRow(`
-		SELECT COUNT(*), SUM(prompt_tokens), SUM(completion_tokens) 
+		SELECT COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0) 
 		FROM gemini_usage WHERE ts >= date('now')
 	`).Scan(&gReq, &gPrompt, &gComp)
 	
-	s.Requests += gReq
-	s.PromptTokens += gPrompt
-	s.CompletionTokens += gComp
+	s.Requests += lReq + gReq
+	s.PromptTokens += lPrompt + gPrompt
+	s.CompletionTokens += lComp + gComp
+	s.TotalCost += lCost
 	
-	return s, err
+	return s, nil
 }
 
 type DayUsage struct {

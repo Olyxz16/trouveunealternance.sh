@@ -156,13 +156,20 @@ func (c *Client) logUsage(resp CompletionResponse, task, runID string) {
 	if c.db == nil {
 		return
 	}
-	var err error
-	if resp.EstimatedCost {
-		err = c.db.InsertGeminiUsage(runID, task, resp.PromptTokens, resp.CompletionTokens)
-	} else {
-		err = c.db.InsertLLMUsage(runID, task, c.provider.Name(), resp.PromptTokens, resp.CompletionTokens, resp.CostUSD)
+
+	usage := &db.TokenUsage{
+		RunID:            runID,
+		Task:             task,
+		Model:            c.provider.Name(),
+		Provider:         c.provider.ProviderName(),
+		PromptTokens:     resp.PromptTokens,
+		CompletionTokens: resp.CompletionTokens,
+		CostUSD:          resp.CostUSD,
+		IsEstimated:      resp.EstimatedCost,
 	}
+
+	err := c.db.InsertTokenUsage(usage)
 	if err != nil {
-		log.Printf("Failed to log LLM usage: %v", err)
+		log.Printf("Failed to log unified token usage: %v", err)
 	}
 }

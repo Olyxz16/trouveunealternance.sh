@@ -20,6 +20,7 @@ type IndividualContact struct {
 	Role        string `json:"role"`
 	LinkedinURL string `json:"linkedin_url"` // MUST be /in/ personal profile, never /company/
 	Email       string `json:"email"`        // personal work email if publicly visible; empty if not
+	Confidence  string `json:"confidence"`   // e.g. 'probable', 'hallucinated'
 }
 
 // IndividualProfileData — extracted from a personal LinkedIn /in/ profile.

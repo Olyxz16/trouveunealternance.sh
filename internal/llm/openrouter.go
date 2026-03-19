@@ -53,6 +53,10 @@ func NewOpenRouterProvider(apiKey, model string) *OpenRouterProvider {
 }
 
 func (p *OpenRouterProvider) Name() string {
+	return p.Model
+}
+
+func (p *OpenRouterProvider) ProviderName() string {
 	return "openrouter"
 }
 

@@ -190,59 +190,84 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 	people, err := e.classifier.ExtractPeopleFromPage(ctx, peopleRes.ContentMD, runID)
 	log.Printf("DEBUG [%s]: ExtractPeopleFromPage result: count=%d, err=%v", comp.Name, len(people.Contacts), err)
 	
-	// Filter hallucinated contacts
-	realContacts := make([]IndividualContact, 0)
-	for _, c := range people.Contacts {
-		if !isHallucinated(c) {
-			realContacts = append(realContacts, c)
+	for i := range people.Contacts {
+		if isHallucinated(people.Contacts[i]) {
+			people.Contacts[i].Confidence = "hallucinated"
 		} else {
-			log.Printf("DEBUG [%s]: Filtered hallucinated contact: %s (%s)", comp.Name, c.Name, c.Role)
+			people.Contacts[i].Confidence = "probable"
 		}
 	}
-	people.Contacts = realContacts
 
-	if err != nil || len(people.Contacts) == 0 {
-		log.Printf("DEBUG [%s]: No real contacts found on page, trying external search", comp.Name)
+	// If NO real contacts found on page, try external search (Gemini Search Grounding)
+	if len(people.Contacts) == 0 {
+		log.Printf("DEBUG [%s]: No contacts found on page, trying external search", comp.Name)
 		disc := NewURLDiscoverer(e.fetcher, e.geminiAPI, e.classifier)
 		extContacts, err := disc.SearchPeopleOnLinkedIn(ctx, *comp, []string{"CTO", "Directeur Technique", "DevOps", "Recrutement", "RH", "Engineering Manager"})
 		if err == nil && len(extContacts) > 0 {
-			// Filter external search too
-			for _, ec := range extContacts {
-				if !isHallucinated(ec) {
-					people.Contacts = append(people.Contacts, ec)
+			for i := range extContacts {
+				if isHallucinated(extContacts[i]) {
+					extContacts[i].Confidence = "hallucinated"
+				} else {
+					extContacts[i].Confidence = "probable"
 				}
 			}
+			people.Contacts = append(people.Contacts, extContacts...)
 		}
-		
-		if len(people.Contacts) == 0 {
-			log.Printf("DEBUG [%s]: No real contacts found even with external search", comp.Name)
-			_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "NO_CONTACT_FOUND"})
-			return nil
-		}
+	}
+
+	if len(people.Contacts) == 0 {
+		log.Printf("DEBUG [%s]: No contacts found even with external search", comp.Name)
+		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "NO_CONTACT_FOUND"})
+		return nil
 	}
 
 	log.Printf("Found %d candidates for %s", len(people.Contacts), comp.Name)
 
+	// Filter out hallucinated ones for enrichment and ranking to avoid wasting tokens
+	var realCandidates []IndividualContact
+	for _, c := range people.Contacts {
+		if c.Confidence != "hallucinated" {
+			realCandidates = append(realCandidates, c)
+		}
+	}
+
 	// 5. Enrich top candidates from their individual /in/ profiles (max 3)
 	maxProfiles := 3
 	enriched := make([]IndividualContact, 0, len(people.Contacts))
-	for i, candidate := range people.Contacts {
+	
+	// We only enrich 'real' candidates
+	for i, candidate := range realCandidates {
 		if i >= maxProfiles {
-			// Save remaining candidates without profile enrichment
 			enriched = append(enriched, candidate)
 			continue
 		}
 		profile, _ := e.classifier.EnrichIndividualProfile(ctx, e.fetcher, candidate, runID)
-		// Merge profile data back into candidate
 		if profile.Email != "" && candidate.Email == "" {
 			candidate.Email = profile.Email
 		}
-		// You can also use profile.RecentPosts or profile.Background if we add a place for them
 		enriched = append(enriched, candidate)
 	}
 
-	// 6. Rank to find best contact
-	best, _ := e.classifier.RankContacts(ctx, enriched, info.CompanyType, runID)
+	// Add the hallucinated ones to 'enriched' list so they get saved too
+	for _, c := range people.Contacts {
+		if c.Confidence == "hallucinated" {
+			enriched = append(enriched, c)
+		}
+	}
+
+	// 6. Rank to find best contact (only from enriched real candidates)
+	var best *IndividualContact
+	if len(realCandidates) > 0 {
+		// Only rank the ones that were in realCandidates
+		toRank := make([]IndividualContact, 0)
+		for _, c := range enriched {
+			if c.Confidence != "hallucinated" {
+				toRank = append(toRank, c)
+			}
+		}
+		best, _ = e.classifier.RankContacts(ctx, toRank, info.CompanyType, runID)
+	}
+
 	if best == nil {
 		log.Printf("No suitable contact found after ranking for %s", comp.Name)
 	} else {
@@ -253,6 +278,12 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 	var primaryContactID int
 	for _, candidate := range enriched {
 		isPrimary := best != nil && candidate.Name == best.Name
+		
+		conf := candidate.Confidence
+		if conf == "" {
+			conf = "probable"
+		}
+
 		contactID, err := e.db.AddContact(&db.Contact{
 			CompanyID:   comp.ID,
 			Name:        db.ToNullString(candidate.Name),
@@ -260,7 +291,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 			LinkedinURL: db.ToNullString(candidate.LinkedinURL),
 			Email:       db.ToNullString(candidate.Email),
 			Source:      db.ToNullString("linkedin"),
-			Confidence:  db.ToNullString("probable"),
+			Confidence:  db.ToNullString(conf),
 		}, isPrimary)
 		
 		if err != nil {
@@ -289,24 +320,20 @@ func firstNonEmpty(vals ...string) string {
 }
 
 func isHallucinated(c IndividualContact) bool {
-	hallucinatedNames := []string{
-		"john doe", "jane smith", "mike smith", "sarah patel", "linda nguyen",
-		"mark brown", "emily davis", "chris johnson", "alex wilson",
+	hallucinatedFullNames := []string{
+		"john doe", "jane smith",
 	}
 	name := strings.ToLower(c.Name)
-	for _, h := range hallucinatedNames {
-		if strings.Contains(name, h) {
+	li := strings.ToLower(c.LinkedinURL)
+	
+	for _, h := range hallucinatedFullNames {
+		if name == h {
 			return true
 		}
 	}
 
-	// A personal profile URL should not contain /company/
-	if strings.Contains(strings.ToLower(c.LinkedinURL), "/company/") {
-		return true
-	}
-
-	// Too short names are suspicious
-	if len(c.Name) < 3 {
+	// Only flag as hallucinated if it really looks like a placeholder
+	if li == "" || li == "n/a" || li == "none" {
 		return true
 	}
 

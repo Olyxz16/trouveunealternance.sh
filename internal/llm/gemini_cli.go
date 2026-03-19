@@ -23,6 +23,10 @@ func (p *GeminiCLIProvider) Name() string {
 	return "gemini_cli"
 }
 
+func (p *GeminiCLIProvider) ProviderName() string {
+	return "gemini_cli"
+}
+
 func (p *GeminiCLIProvider) Complete(ctx context.Context, req CompletionRequest) (CompletionResponse, error) {
 	fullPrompt := req.System + "\n\n" + req.User
 	

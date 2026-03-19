@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/chromedp/chromedp"
 	"go.uber.org/zap"
 )
 
@@ -143,30 +142,7 @@ func (c *CascadeFetcher) ScrollAndFetch(ctx context.Context, url string, scrolls
 
 	c.logger.Info("scrolling and fetching", zap.String("url", url), zap.Int("scrolls", scrolls))
 
-	// Ensure we are on the page - derive from browser.ctx but with timeout
-	fetchCtx, cancelFetch := context.WithTimeout(browser.ctx, 60*time.Second)
-	defer cancelFetch()
-
-	_, err := browser.Fetch(fetchCtx, url)
-	if err != nil {
-		return FetchResult{}, err
-	}
-
-	// Scroll - derive from browser.ctx
-	scrollCtx, cancelScroll := context.WithTimeout(browser.ctx, 30*time.Second)
-	defer cancelScroll()
-
-	err = browser.Scroll(scrollCtx, scrolls)
-	if err != nil {
-		c.logger.Warn("scroll failed", zap.Error(err))
-	}
-
-	// Get HTML after scroll - derive from browser.ctx
-	var html string
-	outerCtx, cancelOuter := context.WithTimeout(browser.ctx, 15*time.Second)
-	defer cancelOuter()
-	
-	err = chromedp.Run(outerCtx, chromedp.OuterHTML("html", &html, chromedp.ByQuery))
+	html, err := browser.FetchWithScroll(ctx, url, scrolls)
 	if err != nil {
 		return FetchResult{}, err
 	}
