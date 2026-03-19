@@ -58,47 +58,62 @@ func NewClassifier(llmClient *llm.Client, database *db.DB) *Classifier {
 	}
 }
 
+func (c *Classifier) GetDB() *db.DB {
+	return c.db
+}
+
 const SearchDiscoveryPrompt = `You are extracting the official company website and LinkedIn company page from search engine results.
 
-Return a JSON object with:
-- website: the official company website (e.g., https://www.enedis.fr)
-- linkedin_url: the official LinkedIn company page (e.g., https://www.linkedin.com/company/enedis)
+Company Context:
+- Name: %s
+- City: %s
+- SIREN: %s
 
 STRICT RULES:
-- Only return the official links.
-- Skip directory sites like Pappers, Societe.com, Verif, etc.
-- If not found, return empty strings.
-`
+- website: the company's own domain. Skip directory sites (societe.com, pappers.fr, etc.).
+- linkedin_url: MUST be the company page (linkedin.com/company/...).
+- VERIFICATION: If the result is clearly for a different company or a different country (e.g. .br, .in when searching for a French company), leave it empty unless you are 100%% sure it's the right one.
+- PREFER results that mention the target city.
+
+Return a JSON object:
+{
+  "website": "...",
+  "linkedin_url": "..."
+}`
 
 const PeopleSearchExtractionPrompt = `You are extracting a list of individual professionals and their LinkedIn profile URLs from search engine results.
 
-Return ALL relevant contacts found (up to 5 people).
+Company Context:
+- Name: %s
+- City: %s
 
 STRICT RULES:
-- linkedin_url MUST be a full, absolute personal LinkedIn profile URL (https://www.linkedin.com/in/...)
+- ONLY extract people who explicitly work for the company and ideally are in the target city/region.
+- SKIP people from other companies even if they appear in search results (e.g. if you see famous CTOs from Palantir or Google, and they don't work for the target company, IGNORE them).
+- linkedin_url MUST be a full, absolute personal LinkedIn profile URL (https://www.linkedin.com/in/...).
 - name and role are required.
-- Focus on: CTO, Engineering Manager, HR, Recruitment, CEO, Founder.
+- Focus on: CTO, Engineering Manager, HR, Recruitment, CEO, Founder, Tech Lead.
 
 Return a JSON object with a single field "contacts" containing the list.`
 
-func (c *Classifier) ExtractPeopleFromSearchResults(ctx context.Context, markdown string, runID string) (PeoplePageData, error) {
+func (c *Classifier) ExtractPeopleFromSearchResults(ctx context.Context, markdown string, comp db.Company, runID string) (PeoplePageData, error) {
 	var result PeoplePageData
 	req := llm.CompletionRequest{
-		System: PeopleSearchExtractionPrompt,
+		System: fmt.Sprintf(PeopleSearchExtractionPrompt, comp.Name, comp.City.String),
 		User:   fmt.Sprintf("Search results (Markdown):\n\n%s", markdown),
 	}
 	err := c.llm.CompleteJSON(ctx, req, "extract_people_from_search", runID, &result)
 	return result, err
 }
 
-func (c *Classifier) ExtractURLsFromSearch(ctx context.Context, searchResultMD string, runID string) (string, string, error) {
+func (c *Classifier) ExtractURLsFromSearch(ctx context.Context, searchResultMD string, comp db.Company, runID string) (string, string, error) {
 	type searchResult struct {
 		Website     string `json:"website"`
 		LinkedinURL string `json:"linkedin_url"`
 	}
 	var res searchResult
 	req := llm.CompletionRequest{
-		System: SearchDiscoveryPrompt,
+		System: fmt.Sprintf(SearchDiscoveryPrompt, comp.Name, comp.City.String, comp.Siren.String),
 		User:   fmt.Sprintf("Search results (Markdown):\n\n%s", searchResultMD),
 	}
 	err := c.llm.CompleteJSON(ctx, req, "extract_urls_from_search", runID, &res)

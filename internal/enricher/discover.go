@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"jobhunter/internal/db"
-	"jobhunter/internal/errors"
 	"jobhunter/internal/llm"
 	"jobhunter/internal/scraper"
 	"log"
@@ -65,22 +64,7 @@ func (d *URLDiscoverer) DiscoverURLs(ctx context.Context, comp db.Company) (stri
 }
 
 func (d *URLDiscoverer) discoverWithGemini(ctx context.Context, comp db.Company) (string, string, error) {
-	var lastErr error
-	for attempt := 0; attempt < 3; attempt++ {
-		if attempt > 0 {
-			time.Sleep(time.Duration(attempt*30) * time.Second)
-		}
-		website, linkedin, err := d.tryGeminiSearch(ctx, comp)
-		if err == nil {
-			return website, linkedin, nil
-		}
-		if _, ok := err.(*errors.RateLimitError); ok {
-			lastErr = err
-			continue // retry after backoff
-		}
-		return "", "", err // non-rate-limit error, don't retry
-	}
-	return "", "", lastErr
+	return d.tryGeminiSearch(ctx, comp)
 }
 
 func (d *URLDiscoverer) tryGeminiSearch(ctx context.Context, comp db.Company) (string, string, error) {
@@ -96,6 +80,10 @@ func (d *URLDiscoverer) tryGeminiSearch(ctx context.Context, comp db.Company) (s
 		System: discoverySystemPrompt,
 		User:   prompt,
 	})
+	if err == nil && d.classifier != nil {
+		// Log usage if we have access to the DB via classifier
+		d.logGeminiUsage(resp, "discovery_gemini")
+	}
 	if err != nil {
 		return "", "", err
 	}
@@ -127,7 +115,7 @@ func (d *URLDiscoverer) discoverWithDDG(ctx context.Context, comp db.Company) (s
 		return "", "", fmt.Errorf("DDG search failed: %w", err)
 	}
 
-	website, linkedin, err := d.classifier.ExtractURLsFromSearch(ctx, res.ContentMD, "discovery_ddg")
+	website, linkedin, err := d.classifier.ExtractURLsFromSearch(ctx, res.ContentMD, comp, "discovery_ddg")
 	if err == nil && (website != "" || linkedin != "") {
 		return website, linkedin, nil
 	}
@@ -137,7 +125,7 @@ func (d *URLDiscoverer) discoverWithDDG(ctx context.Context, comp db.Company) (s
 	searchURL = fmt.Sprintf("https://duckduckgo.com/html/?q=%s", url.QueryEscape(query))
 	res, err = d.fetcher.ScrollAndFetch(ctx, searchURL, 1)
 	if err == nil {
-		w, l, err := d.classifier.ExtractURLsFromSearch(ctx, res.ContentMD, "discovery_ddg_retry")
+		w, l, err := d.classifier.ExtractURLsFromSearch(ctx, res.ContentMD, comp, "discovery_ddg_retry")
 		if err == nil {
 			if website == "" {
 				website = w
@@ -214,7 +202,7 @@ func (d *URLDiscoverer) SearchPeopleOnLinkedIn(ctx context.Context, comp db.Comp
 			continue
 		}
 
-		people, err := d.classifier.ExtractPeopleFromSearchResults(ctx, res.ContentMD, "linkedin_search_people")
+		people, err := d.classifier.ExtractPeopleFromSearchResults(ctx, res.ContentMD, comp, "linkedin_search_people")
 		if err == nil {
 			for _, c := range people.Contacts {
 				if !seenURLs[c.LinkedinURL] && c.LinkedinURL != "" {
@@ -253,6 +241,9 @@ func (d *URLDiscoverer) discoverPeopleWithGemini(ctx context.Context, comp db.Co
 		System: "You are a helpful recruitment research assistant. You provide data in JSON format.",
 		User:   prompt,
 	})
+	if err == nil && d.classifier != nil {
+		d.logGeminiUsage(resp, "people_discovery_gemini")
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -287,6 +278,22 @@ func (d *URLDiscoverer) discoverPeopleWithGemini(ctx context.Context, comp db.Co
 	}
 
 	return result.Contacts, nil
+}
+
+func (d *URLDiscoverer) logGeminiUsage(resp llm.CompletionResponse, task string) {
+	if d.classifier == nil || d.classifier.GetDB() == nil {
+		return
+	}
+	usage := &db.TokenUsage{
+		Task:             task,
+		Model:            d.geminiAPI.Model,
+		Provider:         "gemini_api",
+		PromptTokens:     resp.PromptTokens,
+		CompletionTokens: resp.CompletionTokens,
+		CostUSD:          0,
+		IsEstimated:      false,
+	}
+	_ = d.classifier.GetDB().InsertTokenUsage(usage)
 }
 
 // extractJSONFromText finds the first {...} block in a text response.

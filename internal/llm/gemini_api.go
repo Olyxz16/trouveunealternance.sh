@@ -94,112 +94,87 @@ func (p *GeminiAPIProvider) CompleteWithSearch(ctx context.Context, req Completi
 }
 
 func (p *GeminiAPIProvider) complete(ctx context.Context, req CompletionRequest, withSearch bool) (CompletionResponse, error) {
-	var lastErr error
-	maxRetries := 2
-	backoff := 30 * time.Second
+	log.Printf("Gemini API call (model=%s, withSearch=%v)", p.Model, withSearch)
 
-	for i := 0; i <= maxRetries; i++ {
-		log.Printf("Gemini API call (model=%s, withSearch=%v, attempt=%d/%d)", p.Model, withSearch, i+1, maxRetries+1)
-		
-		payload := geminiRequest{
-			Contents: []geminiContent{
-				{Role: "user", Parts: []geminiPart{{Text: req.User}}},
-			},
-			GenerationConfig: geminiGenerationConfig{},
-		}
-
-		if req.System != "" {
-			payload.SystemInstruction = &geminiContent{
-				Parts: []geminiPart{{Text: req.System}},
-			}
-		}
-
-		if req.JSONMode && !withSearch {
-			payload.GenerationConfig.ResponseMIMEType = "application/json"
-		}
-
-		if withSearch {
-			payload.Tools = []geminiTool{
-				{GoogleSearch: &struct{}{}},
-			}
-		}
-
-		body, err := json.Marshal(payload)
-		if err != nil {
-			return CompletionResponse{}, err
-		}
-
-		url := fmt.Sprintf("%s/%s:generateContent?key=%s",
-			geminiAPIBase, p.Model, p.APIKey)
-
-		httpReq, err := http.NewRequestWithContext(ctx, "POST", url,
-			bytes.NewReader(body))
-		if err != nil {
-			return CompletionResponse{}, err
-		}
-		httpReq.Header.Set("Content-Type", "application/json")
-
-		resp, err := p.HTTPClient.Do(httpReq)
-		if err != nil {
-			lastErr = err
-			if i < maxRetries {
-				time.Sleep(2 * time.Second)
-				continue
-			}
-			break
-		}
-		defer resp.Body.Close()
-
-		raw, err := io.ReadAll(resp.Body)
-		if err != nil {
-			return CompletionResponse{}, err
-		}
-
-		if resp.StatusCode == 429 {
-			lastErr = errors.NewRateLimitError(60, p.Model)
-			if i < maxRetries {
-				log.Printf("Gemini Rate Limit hit, retrying in %v...", backoff)
-				time.Sleep(backoff)
-				backoff *= 2
-				continue
-			}
-			break
-		}
-		
-		if resp.StatusCode != 200 {
-			lastErr = errors.NewModelError(p.Model, resp.StatusCode)
-			if resp.StatusCode >= 500 && i < maxRetries {
-				time.Sleep(5 * time.Second)
-				continue
-			}
-			return CompletionResponse{}, lastErr
-		}
-
-		var gemResp geminiResponse
-		if err := json.Unmarshal(raw, &gemResp); err != nil {
-			return CompletionResponse{}, fmt.Errorf("failed to parse Gemini response: %w", err)
-		}
-
-		if gemResp.Error != nil {
-			return CompletionResponse{}, fmt.Errorf("gemini API error %d: %s",
-				gemResp.Error.Code, gemResp.Error.Message)
-		}
-
-		if len(gemResp.Candidates) == 0 ||
-			len(gemResp.Candidates[0].Content.Parts) == 0 {
-			return CompletionResponse{}, fmt.Errorf("empty response from Gemini API")
-		}
-
-		content := gemResp.Candidates[0].Content.Parts[0].Text
-
-		return CompletionResponse{
-			Content:          content,
-			PromptTokens:     gemResp.UsageMetadata.PromptTokenCount,
-			CompletionTokens: gemResp.UsageMetadata.CandidatesTokenCount,
-			CostUSD:          0,
-			EstimatedCost:    false,
-		}, nil
+	payload := geminiRequest{
+		Contents: []geminiContent{
+			{Role: "user", Parts: []geminiPart{{Text: req.User}}},
+		},
+		GenerationConfig: geminiGenerationConfig{},
 	}
 
-	return CompletionResponse{}, lastErr
+	if req.System != "" {
+		payload.SystemInstruction = &geminiContent{
+			Parts: []geminiPart{{Text: req.System}},
+		}
+	}
+
+	if req.JSONMode && !withSearch {
+		payload.GenerationConfig.ResponseMIMEType = "application/json"
+	}
+
+	if withSearch {
+		payload.Tools = []geminiTool{
+			{GoogleSearch: &struct{}{}},
+		}
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return CompletionResponse{}, err
+	}
+
+	url := fmt.Sprintf("%s/%s:generateContent?key=%s",
+		geminiAPIBase, p.Model, p.APIKey)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url,
+		bytes.NewReader(body))
+	if err != nil {
+		return CompletionResponse{}, err
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := p.HTTPClient.Do(httpReq)
+	if err != nil {
+		return CompletionResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return CompletionResponse{}, err
+	}
+
+	if resp.StatusCode == 429 {
+		return CompletionResponse{}, errors.NewRateLimitError(60, p.Model)
+	}
+
+	if resp.StatusCode != 200 {
+		return CompletionResponse{}, errors.NewModelError(p.Model, resp.StatusCode)
+	}
+
+	var gemResp geminiResponse
+	if err := json.Unmarshal(raw, &gemResp); err != nil {
+		return CompletionResponse{}, fmt.Errorf("failed to parse Gemini response: %w", err)
+	}
+
+	if gemResp.Error != nil {
+		return CompletionResponse{}, fmt.Errorf("gemini API error %d: %s",
+			gemResp.Error.Code, gemResp.Error.Message)
+	}
+
+	if len(gemResp.Candidates) == 0 ||
+		len(gemResp.Candidates[0].Content.Parts) == 0 {
+		return CompletionResponse{}, fmt.Errorf("empty response from Gemini API")
+	}
+
+	content := gemResp.Candidates[0].Content.Parts[0].Text
+
+	return CompletionResponse{
+		Content:          content,
+		PromptTokens:     gemResp.UsageMetadata.PromptTokenCount,
+		CompletionTokens: gemResp.UsageMetadata.CandidatesTokenCount,
+		CostUSD:          0,
+		EstimatedCost:    false,
+	}, nil
 }

@@ -28,7 +28,13 @@ func (e *Extractor) Extract(htmlStr, rawURL string) (string, error) {
 	if err == nil && isGoodQuality(res.ContentText) {
 		var buf bytes.Buffer
 		if err := html.Render(&buf, res.ContentNode); err == nil {
-			return ToMarkdown(buf.String())
+			md, _ := ToMarkdown(buf.String())
+			// If it's too short, append raw body to ensure we have links
+			if len(md) < 2000 {
+				rawMD, _ := ToMarkdown(htmlStr)
+				md = md + "\n\n--- FULL PAGE LINKS ---\n" + rawMD
+			}
+			return md, nil
 		}
 	}
 
@@ -36,7 +42,12 @@ func (e *Extractor) Extract(htmlStr, rawURL string) (string, error) {
 	parsedURL, _ := url.Parse(rawURL)
 	article, err := readability.FromReader(strings.NewReader(htmlStr), parsedURL)
 	if err == nil && isGoodQuality(article.Content) {
-		return ToMarkdown(article.Content)
+		md, _ := ToMarkdown(article.Content)
+		if len(md) < 2000 {
+			rawMD, _ := ToMarkdown(htmlStr)
+			md = md + "\n\n--- FULL PAGE LINKS ---\n" + rawMD
+		}
+		return md, nil
 	}
 
 	// 4. Raw body (last resort)

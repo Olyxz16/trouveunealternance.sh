@@ -33,6 +33,8 @@ Regarding accuracy : I consider accurate a result where
 
 It's okay for some companies to miss some of the informations : if they really have no website, don't invent something, but verify it actually doesn't exist.
 
+When filtering, avoid deleting informations. Mark them as invalid but don't delete them.
+
 # Nevers
 
 Those rules shall be enforced to sub-agents
