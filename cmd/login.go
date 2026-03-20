@@ -39,20 +39,20 @@ var loginCmd = &cobra.Command{
 		}
 		defer bf.Close()
 
-		// Navigate to LinkedIn
-		_, err = bf.Fetch(cmd.Context(), "https://www.linkedin.com/login")
+		// Navigate to LinkedIn once in the persistent tab
+		err = bf.Navigate(cmd.Context(), "https://www.linkedin.com/login")
 		if err != nil {
 			log.Fatalf("Failed to navigate to LinkedIn: %v", err)
 		}
 
 		fmt.Println("Browser is open. Log in now.")
-		fmt.Println("Waiting for login (checking every 5 seconds)...")
+		fmt.Println("Waiting for login (checking every 2 seconds)...")
 		fmt.Println("(Looking for LinkedIn session cookie 'li_at')")
 
 		// Poll for the li_at cookie — LinkedIn's session token.
 		// Present only when logged in; absent on the login/challenge page.
-		for i := 0; i < 60; i++ { // wait up to 5 minutes
-			time.Sleep(5 * time.Second)
+		for i := 0; i < 150; i++ { // wait up to 5 minutes (150 * 2s)
+			time.Sleep(2 * time.Second)
 
 			loggedIn, err := bf.HasCookie("li_at", ".linkedin.com")
 			if err != nil {
@@ -61,7 +61,12 @@ var loginCmd = &cobra.Command{
 			if loggedIn {
 				fmt.Println()
 				fmt.Println("✓ Login detected! Saving session...")
-				// saveCookies is called inside Fetch, so already saved
+				
+				// Force a cookie save manually to be sure
+				if err := bf.SaveCookiesManual(); err != nil {
+					fmt.Printf("Error saving cookies: %v\n", err)
+				}
+				
 				fmt.Printf("✓ Session saved to %s\n", cfg.BrowserCookiesPath)
 				fmt.Println()
 				fmt.Println("⚠ Keep this file private — it contains your LinkedIn session.")

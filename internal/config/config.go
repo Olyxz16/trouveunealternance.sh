@@ -12,7 +12,7 @@ type Config struct {
 	SireneParquetPath   string `env:"SIRENE_PARQUET_PATH" envDefault:"data/sirene_etablissements.parquet"`
 	SireneULParquetPath string `env:"SIRENE_UL_PARQUET_PATH" envDefault:"data/sirene_unites_legales.parquet"`
 	OpenRouterAPIKey    string `env:"OPENROUTER_API_KEY"`
-	OpenRouterModel     string `env:"OPENROUTER_MODEL" envDefault:"google/gemini-2.5-flash-lite"`
+	OpenRouterModel     string `env:"OPENROUTER_MODEL" envDefault:"google/gemini-2.0-flash-lite:free"`
 	OpenRouterRPM       int    `env:"OPENROUTER_RPM" envDefault:"60"`
 	GeminiCLIPath       string `env:"GEMINI_CLI_PATH" envDefault:"gemini"`
 	LLMPrimary          string `env:"LLM_PRIMARY" envDefault:"openrouter"` // or gemini_cli

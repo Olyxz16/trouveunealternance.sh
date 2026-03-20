@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"jobhunter/internal/pipeline"
 	"strings"
 	"time"
 
@@ -12,20 +13,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-type PipelineStatus string
-
-const (
-	StatusRunning PipelineStatus = "running"
-	StatusDone    PipelineStatus = "done"
-	StatusError   PipelineStatus = "error"
-	StatusPending PipelineStatus = "pending"
-)
-
 type CompanyRow struct {
 	ID      int
 	Name    string
 	Step    string
-	Status  PipelineStatus
+	Status  pipeline.Status
 	Message string
 }
 
@@ -33,8 +25,8 @@ type PipelineModel struct {
 	RunID     string
 	StartTime time.Time
 	Companies []CompanyRow
-	Logs      []LogMsg
-	LogChan   <-chan LogMsg
+	Logs      []pipeline.LogMsg
+	LogChan   <-chan pipeline.LogMsg
 	
 	spinner  spinner.Model
 	progress progress.Model
@@ -50,7 +42,7 @@ type PipelineModel struct {
 	Done bool
 }
 
-func NewPipelineModel(runID string, logChan <-chan LogMsg) *PipelineModel {
+func NewPipelineModel(runID string, logChan <-chan pipeline.LogMsg) *PipelineModel {
 	s := spinner.New()
 	s.Spinner = spinner.Dot
 	s.Style = lipgloss.NewStyle().Foreground(Accent)
@@ -86,7 +78,7 @@ func (m PipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.Height = 10 // Fixed height for logs at bottom
 		m.progress.Width = msg.Width - 4
 
-	case LogMsg:
+	case pipeline.LogMsg:
 		m.Logs = append(m.Logs, msg)
 		logLines := []string{}
 		for _, l := range m.Logs {
@@ -96,7 +88,7 @@ func (m PipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.viewport.GotoBottom()
 		return m, WaitForLog(m.LogChan)
 
-	case CompanyUpdateMsg:
+	case pipeline.ProgressUpdate:
 		found := false
 		for i, c := range m.Companies {
 			if c.ID == msg.ID {
@@ -118,10 +110,10 @@ func (m PipelineModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		
 		// Update aggregate counts
-		if msg.Status == StatusDone {
+		if msg.Status == pipeline.StatusDone {
 			m.Processed++
 			m.Success++
-		} else if msg.Status == StatusError {
+		} else if msg.Status == pipeline.StatusError {
 			m.Processed++
 			m.Failed++
 		}
@@ -166,31 +158,47 @@ func (m PipelineModel) View() string {
 	s.WriteString(Bold.Render("Recent Activity:") + "\n")
 	
 	// Calculate available space for company rows
-	// Header(2) + Progress(3) + Labels(1) + Stats(2) + LogsLabel(1) + Viewport(10) + Footer(2) = ~21 lines
-	maxRows := m.height - 22
+	// Header(3) + Progress(3) + Labels(1) + Stats(2) + LogsLabel(1) + Viewport(8) + Footer(2) = ~20 lines
+	logHeight := 8
+	if m.height < 25 {
+		logHeight = 5
+	}
+	
+	maxRows := m.height - (12 + logHeight)
 	if maxRows < 1 {
 		maxRows = 1
 	}
 	
 	count := 0
+	// Show companies that are currently running or recently finished
 	for i := len(m.Companies) - 1; i >= 0 && count < maxRows; i-- {
 		c := m.Companies[i]
 		icon := m.spinner.View()
-		if c.Status == StatusDone {
+		if c.Status == pipeline.StatusDone {
 			icon = lipgloss.NewStyle().Foreground(Accent).Render("✓")
-		} else if c.Status == StatusError {
+		} else if c.Status == pipeline.StatusError {
 			icon = lipgloss.NewStyle().Foreground(Danger).Render("✗")
 		}
 		
 		name := truncate(c.Name, 20)
-		row := fmt.Sprintf(" %s %-20s | %-15s | %s", icon, name, c.Step, DimStyle.Render(c.Message))
+		statusColor := DimStyle
+		if c.Status == pipeline.StatusRunning {
+			statusColor = lipgloss.NewStyle().Foreground(Accent2)
+		}
+		
+		msg := c.Message
+		if msg != "" {
+			msg = " - " + msg
+		}
+		
+		row := fmt.Sprintf(" %s %-20s | %s%s", icon, name, statusColor.Render(fmt.Sprintf("%-15s", c.Step)), DimStyle.Render(truncate(msg, m.width-45)))
 		s.WriteString(lipgloss.NewStyle().MaxWidth(m.width).Render(row) + "\n")
 		count++
 	}
 	
 	// Pad middle space to keep footer at bottom
 	currentHeight := lipgloss.Height(s.String())
-	targetStatsPos := m.height - 15 // Leave space for stats and logs
+	targetStatsPos := m.height - (logHeight + 5)
 	if targetStatsPos > currentHeight {
 		s.WriteString(strings.Repeat("\n", targetStatsPos-currentHeight))
 	}
@@ -205,6 +213,7 @@ func (m PipelineModel) View() string {
 	s.WriteString(footer + "\n\n")
 
 	// Logs
+	m.viewport.Height = logHeight
 	s.WriteString(Bold.Render("Logs:") + "\n")
 	s.WriteString(m.viewport.View())
 
@@ -216,14 +225,6 @@ func (m PipelineModel) View() string {
 }
 
 // Msg types for communication
-type CompanyUpdateMsg struct {
-	ID      int
-	Name    string
-	Step    string
-	Status  PipelineStatus
-	Message string
-}
-
 type TotalUpdateMsg int
 type ReadyMsg struct{}
 type PipelineDoneMsg struct{}

@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"jobhunter/internal/pipeline"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
@@ -20,13 +21,8 @@ var (
 	TitleStyle  = lipgloss.NewStyle().Bold(true).Foreground(Accent).MarginBottom(1)
 )
 
-type LogMsg struct {
-	Level string
-	Text  string
-}
-
 // WaitForLog is a Cmd that waits for a log message on a channel.
-func WaitForLog(ch <-chan LogMsg) tea.Cmd {
+func WaitForLog(ch <-chan pipeline.LogMsg) tea.Cmd {
 	return func() tea.Msg {
 		return <-ch
 	}

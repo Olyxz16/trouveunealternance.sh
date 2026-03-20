@@ -69,16 +69,6 @@ func NewBrowserFetcher(cookiesPath, display string, headless bool, binaryPath st
 	allocCtx, allocCancel := chromedp.NewExecAllocator(context.Background(), opts...)
 	ctx, cancel := chromedp.NewContext(allocCtx)
 
-	// Warm up with timeout — start the browser process now
-	warmupCtx, warmupCancel := context.WithTimeout(ctx, 30*time.Second)
-	defer warmupCancel()
-
-	if err := chromedp.Run(warmupCtx); err != nil {
-		cancel()
-		allocCancel()
-		return nil, fmt.Errorf("failed to start browser (check if Chrome/Chromium is installed): %w", err)
-	}
-
 	bf := &BrowserFetcher{
 		allocCtx:    allocCtx,
 		allocCancel: allocCancel,
@@ -88,9 +78,12 @@ func NewBrowserFetcher(cookiesPath, display string, headless bool, binaryPath st
 		logger:      logger,
 	}
 
-	// Load saved cookies if they exist
+	// Load saved cookies if they exist. This also serves as a "warmup" 
+	// and verifies the browser started correctly.
 	if err := bf.loadCookies(); err != nil {
-		logger.Warn("no saved cookies found, starting fresh session", zap.Error(err))
+		if !os.IsNotExist(err) {
+			logger.Warn("failed to load cookies", zap.Error(err))
+		}
 	} else {
 		logger.Info("browser session loaded", zap.String("cookies", cookiesPath))
 	}
@@ -99,6 +92,12 @@ func NewBrowserFetcher(cookiesPath, display string, headless bool, binaryPath st
 }
 
 func (f *BrowserFetcher) Name() string { return "browser" }
+
+// Navigate opens a URL in the main persistent browser tab.
+func (f *BrowserFetcher) Navigate(ctx context.Context, url string) error {
+	f.logger.Info("browser navigating (persistent)", zap.String("url", url))
+	return chromedp.Run(f.ctx, chromedp.Navigate(url))
+}
 
 // Fetch navigates to url, waits for the page to load, and returns the full HTML.
 func (f *BrowserFetcher) Fetch(ctx context.Context, url string) (string, error) {
@@ -264,6 +263,11 @@ func (f *BrowserFetcher) Close() {
 	_ = f.saveCookies()
 	f.cancel()
 	f.allocCancel()
+}
+
+// SaveCookiesManual triggers a manual save of current browser cookies to the session file.
+func (f *BrowserFetcher) SaveCookiesManual() error {
+	return f.saveCookies()
 }
 
 // HasCookie returns true if a cookie with the given name and domain exists

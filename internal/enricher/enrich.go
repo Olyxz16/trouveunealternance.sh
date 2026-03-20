@@ -6,6 +6,7 @@ import (
 	"jobhunter/internal/collector"
 	"jobhunter/internal/db"
 	"jobhunter/internal/llm"
+	"jobhunter/internal/pipeline"
 	"jobhunter/internal/scraper"
 	"log"
 	"strings"
@@ -17,6 +18,7 @@ type Enricher struct {
 	classifier *Classifier
 	recherche  *collector.RechercheClient
 	geminiAPI  *llm.GeminiAPIProvider // nil if not configured
+	reporter   pipeline.Reporter
 }
 
 func NewEnricher(
@@ -31,6 +33,15 @@ func NewEnricher(
 		classifier: classifier,
 		recherche:  collector.NewRechercheClient(),
 		geminiAPI:  geminiAPI,
+		reporter:   pipeline.NilReporter{},
+	}
+}
+
+func (e *Enricher) SetReporter(r pipeline.Reporter) {
+	if r == nil {
+		e.reporter = pipeline.NilReporter{}
+	} else {
+		e.reporter = r
 	}
 }
 
@@ -40,8 +51,21 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 		return err
 	}
 
+	e.reporter.Update(pipeline.ProgressUpdate{
+		ID:     comp.ID,
+		Name:   comp.Name,
+		Step:   "Initializing",
+		Status: pipeline.StatusRunning,
+	})
+
 	// 0. Resolve generic name if possible (Stage 0)
 	if (strings.HasPrefix(comp.Name, "Company ") || comp.Name == "") && comp.Siren.Valid {
+		e.reporter.Update(pipeline.ProgressUpdate{
+			ID:     comp.ID,
+			Name:   comp.Name,
+			Step:   "Resolving Name",
+			Status: pipeline.StatusRunning,
+		})
 		log.Printf("Resolving generic name for SIREN %s via Recherche API...", comp.Siren.String)
 		info, err := e.recherche.GetCompanyInfo(ctx, comp.Siren.String)
 		if err == nil {
@@ -75,7 +99,14 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 	// 1. Discover URLs if missing
 	linkedin := comp.LinkedinURL.String
 	if website == "" || linkedin == "" {
+		e.reporter.Update(pipeline.ProgressUpdate{
+			ID:     comp.ID,
+			Name:   comp.Name,
+			Step:   "URL Discovery",
+			Status: pipeline.StatusRunning,
+		})
 		disc := NewURLDiscoverer(e.fetcher, e.geminiAPI, e.classifier)
+		disc.SetReporter(e.reporter)
 		w, l, err := disc.DiscoverURLs(ctx, *comp)
 		if err == nil {
 			if website == "" {
@@ -104,6 +135,13 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 		return nil
 	}
 
+	e.reporter.Update(pipeline.ProgressUpdate{
+		ID:      comp.ID,
+		Name:    comp.Name,
+		Step:    "Fetching Page",
+		Status:  pipeline.StatusRunning,
+		Message: targetURL,
+	})
 	res, err := e.fetcher.Fetch(ctx, targetURL)
 	if err == nil {
 		log.Printf("DEBUG [%s]: Fetched %s: quality %.2f via %s", comp.Name, targetURL, res.Quality, res.Method)
@@ -113,6 +151,13 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 		if website != "" && targetURL != website {
 			log.Printf("DEBUG [%s]: low quality fetch for %s (%.2f), retrying with website %s",
 				comp.Name, targetURL, res.Quality, website)
+			e.reporter.Update(pipeline.ProgressUpdate{
+				ID:      comp.ID,
+				Name:    comp.Name,
+				Step:    "Retry Fetch",
+				Status:  pipeline.StatusRunning,
+				Message: website,
+			})
 			res, err = e.fetcher.Fetch(ctx, website)
 			if err == nil {
 				log.Printf("DEBUG [%s]: Website retry result: quality %.2f via %s", comp.Name, res.Quality, res.Method)
@@ -133,6 +178,12 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 	}
 
 	// 3. Extract company-level info
+	e.reporter.Update(pipeline.ProgressUpdate{
+		ID:     comp.ID,
+		Name:   comp.Name,
+		Step:   "Extracting Info",
+		Status: pipeline.StatusRunning,
+	})
 	log.Printf("DEBUG [%s]: Extracting company info from content (length: %d)", comp.Name, len(res.ContentMD))
 	info, err := e.classifier.ExtractCompanyInfo(ctx, res.ContentMD, runID)
 	if err != nil {
@@ -166,6 +217,12 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 		return nil
 	}
 
+	e.reporter.Update(pipeline.ProgressUpdate{
+		ID:     comp.ID,
+		Name:   comp.Name,
+		Step:   "Searching People",
+		Status: pipeline.StatusRunning,
+	})
 	var people PeoplePageData
 	peopleURL := strings.TrimSuffix(linkedin, "/") + "/people/"
 	log.Printf("DEBUG [%s]: Fetching people from %s (with scroll)", comp.Name, peopleURL)
@@ -183,6 +240,12 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 		}
 		// Fallback to website if LinkedIn failed or no contacts found
 		if website != "" {
+			e.reporter.Update(pipeline.ProgressUpdate{
+				ID:     comp.ID,
+				Name:   comp.Name,
+				Step:   "Website Contact Search",
+				Status: pipeline.StatusRunning,
+			})
 			log.Printf("DEBUG [%s]: Retrying contact search on website %s", comp.Name, website)
 			
 			// EXPLORATION PHASE: find interesting links first
@@ -236,6 +299,12 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 
 	// If NO real contacts found on page, try external search (Gemini Search Grounding)
 	if len(people.Contacts) == 0 {
+		e.reporter.Update(pipeline.ProgressUpdate{
+			ID:     comp.ID,
+			Name:   comp.Name,
+			Step:   "External Search",
+			Status: pipeline.StatusRunning,
+		})
 		log.Printf("DEBUG [%s]: No contacts found on page, trying external search", comp.Name)
 		disc := NewURLDiscoverer(e.fetcher, e.geminiAPI, e.classifier)
 		extContacts, err := disc.SearchPeopleOnLinkedIn(ctx, *comp, []string{"CTO", "Directeur Technique", "DevOps", "Recrutement", "RH", "Engineering Manager"})
@@ -268,10 +337,18 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 	}
 
 	// 5. Enrich top candidates from their individual /in/ profiles (max 3)
+	e.reporter.Update(pipeline.ProgressUpdate{
+		ID:      comp.ID,
+		Name:    comp.Name,
+		Step:    "Enriching Contacts",
+		Status:  pipeline.StatusRunning,
+		Message: fmt.Sprintf("0/%d", min(3, len(realCandidates))),
+	})
 	maxProfiles := 3
 	enriched := make([]IndividualContact, 0, len(people.Contacts))
 	
 	// We only enrich 'real' candidates
+	enrichedCount := 0
 	for i, candidate := range realCandidates {
 		if i >= maxProfiles {
 			enriched = append(enriched, candidate)
@@ -282,6 +359,14 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 			candidate.Email = profile.Email
 		}
 		enriched = append(enriched, candidate)
+		enrichedCount++
+		e.reporter.Update(pipeline.ProgressUpdate{
+			ID:      comp.ID,
+			Name:    comp.Name,
+			Step:    "Enriching Contacts",
+			Status:  pipeline.StatusRunning,
+			Message: fmt.Sprintf("%d/%d", enrichedCount, min(3, len(realCandidates))),
+		})
 	}
 
 	// Add the hallucinated ones to 'enriched' list so they get saved too
@@ -292,6 +377,12 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 	}
 
 	// 6. Rank to find best contact (only from enriched real candidates)
+	e.reporter.Update(pipeline.ProgressUpdate{
+		ID:     comp.ID,
+		Name:   comp.Name,
+		Step:   "Ranking Contacts",
+		Status: pipeline.StatusRunning,
+	})
 	var best *IndividualContact
 	if len(realCandidates) > 0 {
 		// Only rank the ones that were in realCandidates
@@ -311,6 +402,12 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 	}
 
 	// 7. Save ALL contacts, mark best as primary
+	e.reporter.Update(pipeline.ProgressUpdate{
+		ID:     comp.ID,
+		Name:   comp.Name,
+		Step:   "Saving Results",
+		Status: pipeline.StatusRunning,
+	})
 	var primaryContactID int
 	for _, candidate := range enriched {
 		isPrimary := best != nil && candidate.Name == best.Name
@@ -344,6 +441,13 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID int, runID string) 
 	_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": status})
 
 	return nil
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func firstNonEmpty(vals ...string) string {

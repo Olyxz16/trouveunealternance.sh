@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"jobhunter/internal/db"
+	"jobhunter/internal/errors"
 	"jobhunter/internal/llm"
+	"jobhunter/internal/pipeline"
 	"jobhunter/internal/scraper"
 	"log"
 	"net/url"
@@ -24,10 +26,24 @@ type URLDiscoverer struct {
 	fetcher    *scraper.CascadeFetcher
 	geminiAPI  *llm.GeminiAPIProvider // nil if not configured — falls back to DDG
 	classifier *Classifier
+	reporter   pipeline.Reporter
 }
 
 func NewURLDiscoverer(fetcher *scraper.CascadeFetcher, geminiAPI *llm.GeminiAPIProvider, classifier *Classifier) *URLDiscoverer {
-	return &URLDiscoverer{fetcher: fetcher, geminiAPI: geminiAPI, classifier: classifier}
+	return &URLDiscoverer{
+		fetcher:    fetcher,
+		geminiAPI:  geminiAPI,
+		classifier: classifier,
+		reporter:   pipeline.NilReporter{},
+	}
+}
+
+func (d *URLDiscoverer) SetReporter(r pipeline.Reporter) {
+	if r == nil {
+		d.reporter = pipeline.NilReporter{}
+	} else {
+		d.reporter = r
+	}
 }
 
 const discoverySystemPrompt = `You are finding the online presence of French companies.
@@ -56,7 +72,19 @@ func (d *URLDiscoverer) DiscoverURLs(ctx context.Context, comp db.Company) (stri
 			log.Printf("DEBUG [%s]: Gemini discovery success: website=%s, linkedin=%s", comp.Name, website, linkedin)
 			return website, linkedin, nil
 		}
-		log.Printf("DEBUG [%s]: Gemini discovery failed or empty (err: %v). Falling back to DDG...", comp.Name, err)
+		
+		msg := "Gemini search grounding failed"
+		if err != nil {
+			msg = fmt.Sprintf("Gemini search grounding failed: %v", err)
+		}
+		d.reporter.Log(pipeline.LogMsg{Level: "WARN", Text: fmt.Sprintf("[%s] %s. Falling back to DuckDuckGo...", comp.Name, msg)})
+		
+		d.reporter.Update(pipeline.ProgressUpdate{
+			ID:     comp.ID,
+			Name:   comp.Name,
+			Step:   "URL Discovery (DDG Fallback)",
+			Status: pipeline.StatusRunning,
+		})
 	}
 	w, l, err := d.discoverWithDDG(ctx, comp)
 	log.Printf("DEBUG [%s]: DDG discovery result: website=%s, linkedin=%s", comp.Name, w, l)
@@ -64,7 +92,47 @@ func (d *URLDiscoverer) DiscoverURLs(ctx context.Context, comp db.Company) (stri
 }
 
 func (d *URLDiscoverer) discoverWithGemini(ctx context.Context, comp db.Company) (string, string, error) {
-	return d.tryGeminiSearch(ctx, comp)
+	var lastErr error
+	backoff := 5 * time.Second
+	for attempt := 0; attempt < 3; attempt++ {
+		if attempt > 0 {
+			log.Printf("DEBUG [%s]: Retrying Gemini discovery (attempt %d/3) in %v...", comp.Name, attempt+1, backoff)
+			select {
+			case <-ctx.Done():
+				return "", "", ctx.Err()
+			case <-time.After(backoff):
+				backoff *= 2
+			}
+		}
+
+		website, linkedin, err := d.tryGeminiSearch(ctx, comp)
+		if err == nil && (website != "" || linkedin != "") {
+			return website, linkedin, nil
+		}
+		
+		if err != nil {
+			lastErr = err
+			// Check if it's a rate limit error or model error that warrants a retry
+			shouldRetry := false
+			if _, ok := err.(*errors.RateLimitError); ok {
+				shouldRetry = true
+			} else if strings.Contains(err.Error(), "429") || strings.Contains(err.Error(), "rate") {
+				shouldRetry = true
+			} else if strings.Contains(err.Error(), "500") || strings.Contains(err.Error(), "503") {
+				shouldRetry = true
+			}
+
+			if shouldRetry {
+				continue
+			}
+			// For other errors (e.g. 404, 400), don't retry
+			return "", "", err
+		}
+		
+		// If err == nil but no results, we stop (don't retry a successful empty response)
+		return "", "", nil
+	}
+	return "", "", lastErr
 }
 
 func (d *URLDiscoverer) tryGeminiSearch(ctx context.Context, comp db.Company) (string, string, error) {

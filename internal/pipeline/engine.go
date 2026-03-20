@@ -32,11 +32,23 @@ type Run struct {
 }
 
 type Engine struct {
-	DB *db.DB
+	DB       *db.DB
+	reporter Reporter
 }
 
 func NewEngine(database *db.DB) *Engine {
-	return &Engine{DB: database}
+	return &Engine{
+		DB:       database,
+		reporter: NilReporter{},
+	}
+}
+
+func (e *Engine) SetReporter(r Reporter) {
+	if r == nil {
+		e.reporter = NilReporter{}
+	} else {
+		e.reporter = r
+	}
 }
 
 func (e *Engine) Execute(ctx context.Context, runID string, steps []Step) (*Run, error) {
@@ -45,6 +57,8 @@ func (e *Engine) Execute(ctx context.Context, runID string, steps []Step) (*Run,
 		StartedAt: time.Now(),
 		DB:        e.DB,
 	}
+
+	e.reporter.Log(LogMsg{Level: "INFO", Text: fmt.Sprintf("Starting pipeline run %s", runID)})
 
 	if err := e.DB.CreatePipelineRun(run.ID); err != nil {
 		return nil, fmt.Errorf("failed to create pipeline run in DB: %w", err)
@@ -69,22 +83,21 @@ func (e *Engine) Execute(ctx context.Context, runID string, steps []Step) (*Run,
 		log.Printf("Failed to finalize pipeline run %s: %v", run.ID, err)
 	}
 
+	e.reporter.Log(LogMsg{Level: "INFO", Text: fmt.Sprintf("Pipeline run %s finished with status: %s", runID, finalStatus)})
+
 	return run, nil
 }
 
 func (e *Engine) runStep(ctx context.Context, run *Run, step Step) StepResult {
 	start := time.Now()
-	
+	e.reporter.Log(LogMsg{Level: "INFO", Text: fmt.Sprintf("Executing step: %s", step.Name)})
+
 	// Initial log entry
 	logEntry := &db.RunLog{
 		RunID:  run.ID,
 		Step:   step.Name,
 		Status: "running",
 	}
-	// Note: In current db implementation, LogStep only does INSERT. 
-	// To follow the PLAN.md "UPDATE run_log", we might need to adjust or just log final state.
-	// For now, let's log the start and then the end as separate entries or update if we had an ID.
-	// Actually, the PLAN.md says "writes to run_log on every state transition".
 
 	ctx, cancel := context.WithTimeout(ctx, step.Timeout)
 	defer cancel()
@@ -97,8 +110,10 @@ func (e *Engine) runStep(ctx context.Context, run *Run, step Step) StepResult {
 	if err != nil {
 		status = "error"
 		errMsg = err.Error()
-		// We could categorize error types here if needed
 		errType = "generic" 
+		e.reporter.Log(LogMsg{Level: "ERROR", Text: fmt.Sprintf("Step %s failed: %v", step.Name, err)})
+	} else {
+		e.reporter.Log(LogMsg{Level: "INFO", Text: fmt.Sprintf("Step %s completed in %v", step.Name, time.Since(start).Round(time.Millisecond))})
 	}
 
 	logEntry.Status = status

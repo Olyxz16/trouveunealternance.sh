@@ -46,11 +46,14 @@ var scanCmd = &cobra.Command{
 		log.SetOutput(logFile)
 
 		// 2. Setup TUI
-		logCh := make(chan tui.LogMsg, 100)
+		logCh := make(chan pipeline.LogMsg, 100)
 		m := tui.NewPipelineModel(runID, logCh)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 
+		reporter := &TUIReporter{program: p, noTUI: false, logCh: logCh}
 		engine := pipeline.NewEngine(database)
+		engine.SetReporter(reporter)
+
 		sirene := collector.NewSireneCollector(database, cfg.SireneParquetPath, cfg.SireneULParquetPath)
 		
 		go func() {
@@ -60,12 +63,11 @@ var scanCmd = &cobra.Command{
 					Name:    "scan_sirene",
 					Timeout: 1 * time.Hour,
 					Fn: func(ctx context.Context, run *pipeline.Run) error {
-						logCh <- tui.LogMsg{Level: "INFO", Text: "Starting SIRENE scan..."}
 						total, new, err := sirene.Scan(ctx, depts, minHeadcount)
 						if err != nil {
 							return err
 						}
-						logCh <- tui.LogMsg{Level: "INFO", Text: fmt.Sprintf("SIRENE Scan complete: Found %d candidates, %d new.", total, new)}
+						reporter.Log(pipeline.LogMsg{Level: "INFO", Text: fmt.Sprintf("SIRENE Scan results: Found %d candidates, %d new.", total, new)})
 						return nil
 					},
 				},
@@ -80,7 +82,7 @@ var scanCmd = &cobra.Command{
 
 			_, err := engine.Execute(context.Background(), runID, steps)
 			if err != nil {
-				logCh <- tui.LogMsg{Level: "ERROR", Text: fmt.Sprintf("Pipeline failed: %v", err)}
+				// Handled by engine logging
 			}
 			p.Send(tui.PipelineDoneMsg{})
 		}()
@@ -108,7 +110,7 @@ var scoreCmd = &cobra.Command{
 		log.SetOutput(logFile)
 
 		// 2. Setup TUI
-		logCh := make(chan tui.LogMsg, 100)
+		logCh := make(chan pipeline.LogMsg, 100)
 		m := tui.NewPipelineModel(runID, logCh)
 		p := tea.NewProgram(m, tea.WithAltScreen())
 
@@ -116,7 +118,7 @@ var scoreCmd = &cobra.Command{
 			time.Sleep(100 * time.Millisecond)
 			err := scoreUnscoredWithTUI(context.Background(), runID, p, logCh)
 			if err != nil {
-				logCh <- tui.LogMsg{Level: "ERROR", Text: fmt.Sprintf("Scoring failed: %v", err)}
+				logCh <- pipeline.LogMsg{Level: "ERROR", Text: fmt.Sprintf("Scoring failed: %v", err)}
 			}
 			p.Send(tui.PipelineDoneMsg{})
 		}()
@@ -128,7 +130,7 @@ var scoreCmd = &cobra.Command{
 	},
 }
 
-func scoreUnscoredWithTUI(ctx context.Context, runID string, p *tea.Program, logCh chan tui.LogMsg) error {
+func scoreUnscoredWithTUI(ctx context.Context, runID string, p *tea.Program, logCh chan pipeline.LogMsg) error {
 	companies, err := database.GetCompaniesForEnrichment()
 	if err != nil {
 		return err
@@ -142,11 +144,11 @@ func scoreUnscoredWithTUI(ctx context.Context, runID string, p *tea.Program, log
 	}
 
 	if len(unscored) == 0 {
-		logCh <- tui.LogMsg{Level: "INFO", Text: "No unscored companies found."}
+		logCh <- pipeline.LogMsg{Level: "INFO", Text: "No unscored companies found."}
 		return nil
 	}
 
-	logCh <- tui.LogMsg{Level: "INFO", Text: fmt.Sprintf("Scoring %d companies...", len(unscored))}
+	logCh <- pipeline.LogMsg{Level: "INFO", Text: fmt.Sprintf("Scoring %d companies...", len(unscored))}
 	p.Send(tui.TotalUpdateMsg(len(unscored)))
 	
 	// Setup LLM
@@ -156,31 +158,31 @@ func scoreUnscoredWithTUI(ctx context.Context, runID string, p *tea.Program, log
 	classifier := enricher.NewClassifier(llmClient, database)
 
 	for _, c := range unscored {
-		p.Send(tui.CompanyUpdateMsg{
+		p.Send(pipeline.ProgressUpdate{
 			ID:     c.ID,
 			Name:   c.Name,
 			Step:   "Scoring",
-			Status: tui.StatusRunning,
+			Status: pipeline.StatusRunning,
 		})
 
 		score, err := classifier.ScoreCompany(ctx, c, runID)
 		if err != nil {
-			p.Send(tui.CompanyUpdateMsg{
+			p.Send(pipeline.ProgressUpdate{
 				ID:      c.ID,
 				Name:    c.Name,
 				Step:    "Failed",
-				Status:  tui.StatusError,
+				Status:  pipeline.StatusError,
 				Message: err.Error(),
 			})
-			logCh <- tui.LogMsg{Level: "ERROR", Text: fmt.Sprintf("Failed to score %s: %v", c.Name, err)}
+			logCh <- pipeline.LogMsg{Level: "ERROR", Text: fmt.Sprintf("Failed to score %s: %v", c.Name, err)}
 			continue
 		}
 
-		p.Send(tui.CompanyUpdateMsg{
+		p.Send(pipeline.ProgressUpdate{
 			ID:     c.ID,
 			Name:   c.Name,
 			Step:   fmt.Sprintf("Scored: %d", score.RelevanceScore),
-			Status: tui.StatusDone,
+			Status: pipeline.StatusDone,
 		})
 	}
 

@@ -7,6 +7,7 @@ import (
 	"jobhunter/internal/db"
 	"jobhunter/internal/enricher"
 	"jobhunter/internal/llm"
+	"jobhunter/internal/pipeline"
 	"jobhunter/internal/scraper"
 	"jobhunter/internal/tui"
 	"log"
@@ -33,6 +34,47 @@ func init() {
 	enrichCmd.Flags().BoolVar(&noTUI, "no-tui", false, "Disable TUI and log to stdout")
 	rootCmd.AddCommand(enrichCmd)
 }
+
+type TUIReporter struct {
+	program *tea.Program
+	noTUI   bool
+	logCh   chan<- pipeline.LogMsg
+}
+
+func (r *TUIReporter) Update(upd pipeline.ProgressUpdate) {
+	if !r.noTUI {
+		r.program.Send(upd)
+	}
+}
+
+func (r *TUIReporter) Log(msg pipeline.LogMsg) {
+	if !r.noTUI {
+		r.logCh <- msg
+	} else {
+		log.Printf("%s: %s", msg.Level, msg.Text)
+	}
+}
+
+type tuiLogCore struct {
+	zapcore.LevelEnabler
+	logCh chan<- pipeline.LogMsg
+}
+
+func (c *tuiLogCore) With(fields []zapcore.Field) zapcore.Core { return c }
+func (c *tuiLogCore) Check(entry zapcore.Entry, ce *zapcore.CheckedEntry) *zapcore.CheckedEntry {
+	if c.Enabled(entry.Level) {
+		return ce.AddCore(entry, c)
+	}
+	return ce
+}
+func (c *tuiLogCore) Write(entry zapcore.Entry, fields []zapcore.Field) error {
+	c.logCh <- pipeline.LogMsg{
+		Level: entry.Level.CapitalString(),
+		Text:  entry.Message,
+	}
+	return nil
+}
+func (c *tuiLogCore) Sync() error { return nil }
 
 var enrichCmd = &cobra.Command{
 	Use:   "enrich",
@@ -91,31 +133,45 @@ var enrichCmd = &cobra.Command{
 			return
 		}
 
+		// 4. Setup TUI and background worker
+		logCh := make(chan pipeline.LogMsg, 100)
+		m := tui.NewPipelineModel(runID, logCh)
+		p := tea.NewProgram(m, tea.WithAltScreen())
+
 		// 3. Setup zap logger for the components
 		encoderConfig := zap.NewDevelopmentEncoderConfig()
-		core := zapcore.NewCore(
+		fileCore := zapcore.NewCore(
 			zapcore.NewConsoleEncoder(encoderConfig),
 			zapcore.AddSync(logFile),
 			zap.InfoLevel,
 		)
+		
+		var core zapcore.Core
+		if noTUI {
+			core = fileCore
+		} else {
+			tuiCore := &tuiLogCore{
+				LevelEnabler: zap.InfoLevel,
+				logCh:        logCh,
+			}
+			core = zapcore.NewTee(fileCore, tuiCore)
+		}
+		
 		logger := zap.New(core)
 		defer logger.Sync()
 
-		// 4. Setup TUI and background worker
-		logCh := make(chan tui.LogMsg, 100)
-		m := tui.NewPipelineModel(runID, logCh)
-		p := tea.NewProgram(m, tea.WithAltScreen())
-
 		worker := func() {
+			reporter := &TUIReporter{program: p, noTUI: noTUI, logCh: logCh}
+
 			// Small delay to ensure TUI has started and received WindowSizeMsg
 			if !noTUI {
 				time.Sleep(100 * time.Millisecond)
 				p.Send(tui.TotalUpdateMsg(len(targetCompanies)))
 			}
-			log.Printf("INFO: Initializing enrichment pipeline...")
+			reporter.Log(pipeline.LogMsg{Level: "INFO", Text: "Initializing enrichment pipeline..."})
 
 			// Setup LLM
-			log.Printf("INFO: Connecting to LLM providers...")
+			reporter.Log(pipeline.LogMsg{Level: "INFO", Text: "Connecting to LLM providers..."})
 			primary, fallback := llm.InitProviders(cfg.LLMPrimary, cfg.LLMFallback, cfg)
 
 			llmClient := llm.NewClient(primary, fallback, cfg.OpenRouterRPM, database)
@@ -124,13 +180,13 @@ var enrichCmd = &cobra.Command{
 			var geminiAPI *llm.GeminiAPIProvider
 			if cfg.GeminiAPIKey != "" {
 				geminiAPI = llm.NewGeminiAPIProvider(cfg.GeminiAPIKey, cfg.GeminiAPIModel)
-				log.Printf("INFO: Gemini API search grounding enabled for URL discovery")
+				reporter.Log(pipeline.LogMsg{Level: "INFO", Text: "Gemini API search grounding enabled for URL discovery"})
 			} else {
-				log.Printf("WARN: GEMINI_API_KEY not set — falling back to DuckDuckGo for discovery")
+				reporter.Log(pipeline.LogMsg{Level: "WARN", Text: "GEMINI_API_KEY not set — falling back to DuckDuckGo for discovery"})
 			}
 
 			// Setup Scraper
-			log.Printf("INFO: Launching browser instance...")
+			reporter.Log(pipeline.LogMsg{Level: "INFO", Text: "Launching browser instance..."})
 			httpFetcher := scraper.NewHTTPFetcher()
 			browserFetcher, err := scraper.NewBrowserFetcher(
 				cfg.BrowserCookiesPath,
@@ -140,56 +196,44 @@ var enrichCmd = &cobra.Command{
 				logger,
 			)
 			if err != nil {
-				log.Printf("WARN: Browser failed: %v. Using HTTP only.", err)
+				reporter.Log(pipeline.LogMsg{Level: "WARN", Text: fmt.Sprintf("Browser failed: %v. Using HTTP only.", err)})
 			} else {
 				defer browserFetcher.Close()
-				log.Printf("INFO: Browser ready.")
+				reporter.Log(pipeline.LogMsg{Level: "INFO", Text: "Browser ready."})
 			}
 
 			forceDomains := strings.Split(cfg.ForceBrowserDomains, ",")
 			extractor := scraper.NewExtractor()
 			cascade := scraper.NewCascadeFetcher(httpFetcher, browserFetcher, forceDomains, database, extractor, logger)
 			enr := enricher.NewEnricher(database, cascade, classifier, geminiAPI)
+			enr.SetReporter(reporter)
 
 			if !noTUI {
 				p.Send(tui.ReadyMsg{})
 			}
-			log.Printf("INFO: Enriching %d companies...", len(targetCompanies))
+			reporter.Log(pipeline.LogMsg{Level: "INFO", Text: fmt.Sprintf("Enriching %d companies...", len(targetCompanies))})
 
 			// Start Processing
 			for _, c := range targetCompanies {
-				if !noTUI {
-					p.Send(tui.CompanyUpdateMsg{
-						ID:     c.ID,
-						Name:   c.Name,
-						Step:   "Researching",
-						Status: tui.StatusRunning,
-					})
-				}
-
 				err := enr.EnrichCompany(ctx, c.ID, runID)
 				
 				if err != nil {
-					if !noTUI {
-						p.Send(tui.CompanyUpdateMsg{
-							ID:      c.ID,
-							Name:    c.Name,
-							Step:    "Failed",
-							Status:  tui.StatusError,
-							Message: err.Error(),
-						})
-					}
-					log.Printf("ERROR: Failed to enrich %s: %v", c.Name, err)
+					reporter.Update(pipeline.ProgressUpdate{
+						ID:      c.ID,
+						Name:    c.Name,
+						Step:    "Failed",
+						Status:  pipeline.StatusError,
+						Message: err.Error(),
+					})
+					reporter.Log(pipeline.LogMsg{Level: "ERROR", Text: fmt.Sprintf("Failed to enrich %s: %v", c.Name, err)})
 				} else {
-					if !noTUI {
-						p.Send(tui.CompanyUpdateMsg{
-							ID:     c.ID,
-							Name:   c.Name,
-							Step:   "Done",
-							Status: tui.StatusDone,
-						})
-					}
-					log.Printf("INFO: Successfully enriched %s", c.Name)
+					reporter.Update(pipeline.ProgressUpdate{
+						ID:     c.ID,
+						Name:   c.Name,
+						Step:   "Done",
+						Status: pipeline.StatusDone,
+					})
+					reporter.Log(pipeline.LogMsg{Level: "INFO", Text: fmt.Sprintf("Successfully enriched %s", c.Name)})
 				}
 				
 				time.Sleep(1 * time.Second)
