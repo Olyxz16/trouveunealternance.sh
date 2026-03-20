@@ -56,12 +56,13 @@ type UsageStats struct {
 
 func (db *DB) GetUsageToday() (UsageStats, error) {
 	var s UsageStats
-	today := time.Now().Format("2006-01-02")
+	now := time.Now()
+	startOfDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	
-	db.Model(&TokenUsage{}).Where("date(created_at) = ?", today).Count(&s.Requests)
-	db.Model(&TokenUsage{}).Where("date(created_at) = ?", today).Select("COALESCE(SUM(prompt_tokens), 0)").Scan(&s.PromptTokens)
-	db.Model(&TokenUsage{}).Where("date(created_at) = ?", today).Select("COALESCE(SUM(completion_tokens), 0)").Scan(&s.CompletionTokens)
-	db.Model(&TokenUsage{}).Where("date(created_at) = ?", today).Select("COALESCE(SUM(cost_usd), 0)").Scan(&s.TotalCost)
+	db.Model(&TokenUsage{}).Where("created_at >= ?", startOfDay).Count(&s.Requests)
+	db.Model(&TokenUsage{}).Where("created_at >= ?", startOfDay).Select("COALESCE(SUM(prompt_tokens), 0)").Scan(&s.PromptTokens)
+	db.Model(&TokenUsage{}).Where("created_at >= ?", startOfDay).Select("COALESCE(SUM(completion_tokens), 0)").Scan(&s.CompletionTokens)
+	db.Model(&TokenUsage{}).Where("created_at >= ?", startOfDay).Select("COALESCE(SUM(cost_usd), 0)").Scan(&s.TotalCost)
 	
 	return s, nil
 }
@@ -77,7 +78,11 @@ func (db *DB) GetUsageHistory(days int) ([]DayUsage, error) {
 		Cost float64
 	}
 	
-	// SQLite specific date grouping, might need adjustment for Postgres
+	// We still need some DB-specific logic here for grouping by day.
+	// For cross-DB compatibility, it's often better to fetch raw and group in Go,
+	// or use GORM's dialect-specific functions if possible.
+	// Staying with a simple query that works for SQLite for now, but marking for fix.
+	
 	db.Model(&TokenUsage{}).
 		Select("date(created_at) as day, SUM(cost_usd) as cost").
 		Group("day").
@@ -103,7 +108,7 @@ func (db *DB) GetScrapingHealth() (HealthStats, error) {
 	var s HealthStats
 	db.Model(&ScrapeCache{}).Where("method='http' AND quality >= 0.7").Count(&s.HTTPHealthy)
 	db.Model(&ScrapeCache{}).Where("method='http'").Count(&s.HTTPTotal)
-	db.Model(&ScrapeCache{}).Where("method='browser' AND created_at >= ?", time.Now().Add(-24*time.Hour)).Count(&s.Browser24h)
+	db.Model(&ScrapeCache{}).Where("created_at >= ?", time.Now().Add(-24*time.Hour)).Count(&s.Browser24h)
 	db.Model(&RunLog{}).Where("status='needs_review' AND started_at >= ?", time.Now().Add(-24*time.Hour)).Count(&s.NeedsReviewCount)
 	return s, nil
 }

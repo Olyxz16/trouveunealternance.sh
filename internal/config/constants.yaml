@@ -1,0 +1,58 @@
+# Scraping and Enrichment Constants
+
+quality_thresholds:
+  http_min: 0.7
+  browser_min: 0.3
+  discovery_min: 0.2
+  enrich_min: 0.5
+
+delays:
+  browser_settle: 3000ms
+  cookie_click: 500ms
+  scroll_base: 2000ms
+  scroll_variance: 500ms
+  retry_backoff: 5s
+  batch_sleep: 1s
+
+sirene:
+  tech_naf_prefixes:
+    - "62"
+    - "63"
+  naf_labels:
+    "6201Z": "Programmation informatique"
+    "6202A": "Conseil en systèmes et logiciels informatiques"
+    "6202B": "Tierce maintenance de systèmes et d'applications informatiques"
+    "6203Z": "Gestion d'installations informatiques"
+    "6209Z": "Autres activités informatiques"
+    "6311Z": "Traitement de données, hébergement et activités connexes"
+    "6312Z": "Portails Internet"
+  headcount_levels:
+    "03": 6
+    "11": 10
+    "12": 20
+    "21": 50
+    "22": 100
+    "31": 200
+    "32": 250
+    "41": 500
+    "42": 1000
+    "51": 2000
+    "52": 5000
+    "53": 10000
+  headcount_labels:
+    "NN": "0"
+    "00": "0"
+    "01": "1-2"
+    "02": "3-5"
+    "03": "6-9"
+    "11": "10-19"
+    "12": "20-49"
+    "21": "50-99"
+    "22": "100-199"
+    "31": "200-249"
+    "32": "250-499"
+    "41": "500-999"
+    "42": "1000-1999"
+    "51": "2000-4999"
+    "52": "5000-9999"
+    "53": "10000+"

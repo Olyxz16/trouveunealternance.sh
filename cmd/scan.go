@@ -54,7 +54,7 @@ var scanCmd = &cobra.Command{
 		engine := pipeline.NewEngine(database)
 		engine.SetReporter(reporter)
 
-		sirene := collector.NewSireneCollector(database, cfg.SireneParquetPath, cfg.SireneULParquetPath)
+		sirene := collector.NewSireneCollector(database, cfg)
 		
 		go func() {
 			time.Sleep(100 * time.Millisecond)
@@ -154,7 +154,7 @@ func scoreUnscoredWithTUI(ctx context.Context, runID string, p *tea.Program, log
 	// Setup LLM
 	primary, fallback := llm.InitProviders(cfg.LLMPrimary, cfg.LLMFallback, cfg)
 
-	llmClient := llm.NewClient(primary, fallback, cfg.OpenRouterRPM, database)
+	llmClient := llm.NewClient(primary, fallback, cfg.OpenRouterRPM, database, nil)
 	classifier := enricher.NewClassifier(llmClient, database)
 
 	for _, c := range unscored {

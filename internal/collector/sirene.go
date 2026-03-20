@@ -5,6 +5,7 @@ import (
 	"encoding/csv"
 	"fmt"
 	"io"
+	"jobhunter/internal/config"
 	"jobhunter/internal/db"
 	"log"
 	"net/http"
@@ -15,30 +16,21 @@ import (
 )
 
 const SIRENE_PARQUET_URL = "https://object.files.data.gouv.fr/data-pipeline-open/siren/stock/StockEtablissement_utf8.parquet"
-
-var NAF_LABELS = map[string]string{
-	"6201Z": "Programmation informatique",
-	"6202A": "Conseil en systèmes et logiciels informatiques",
-	"6202B": "Tierce maintenance de systèmes et d'applications informatiques",
-	"6203Z": "Gestion d'installations informatiques",
-	"6209Z": "Autres activités informatiques",
-	"6311Z": "Traitement de données, hébergement et activités connexes",
-	"6312Z": "Portails Internet",
-}
-
-var TECH_NAF_PREFIXES = []string{"62", "63"}
+const SIRENE_UL_URL = "https://object.files.data.gouv.fr/data-pipeline-open/siren/stock/StockUniteLegale_utf8.parquet"
 
 type SireneCollector struct {
 	db        *db.DB
+	cfg       *config.Config
 	parquet   string
 	ulParquet string
 }
 
-func NewSireneCollector(database *db.DB, parquetPath, ulParquetPath string) *SireneCollector {
+func NewSireneCollector(database *db.DB, cfg *config.Config) *SireneCollector {
 	return &SireneCollector{
 		db:        database,
-		parquet:   parquetPath,
-		ulParquet: ulParquetPath,
+		cfg:       cfg,
+		parquet:   cfg.SireneParquetPath,
+		ulParquet: cfg.SireneULParquetPath,
 	}
 }
 
@@ -61,8 +53,6 @@ func (s *SireneCollector) EnsureData(ctx context.Context) error {
 
 	return nil
 }
-
-const SIRENE_UL_URL = "https://object.files.data.gouv.fr/data-pipeline-open/siren/stock/StockUniteLegale_utf8.parquet"
 
 func (s *SireneCollector) download(ctx context.Context, url, dest string) error {
 	dir := filepath.Dir(dest)
@@ -161,7 +151,7 @@ func (s *SireneCollector) Scan(ctx context.Context, departments []string, minHea
 		zip := record[7]
 		city := record[8]
 
-		hcVal := getMinHeadcount(hcCode)
+		hcVal := s.getMinHeadcount(hcCode)
 		if hcVal < minHeadcount {
 			continue
 		}
@@ -174,7 +164,7 @@ func (s *SireneCollector) Scan(ctx context.Context, departments []string, minHea
 		status := "NEW"
 
 		isTech := false
-		for _, prefix := range TECH_NAF_PREFIXES {
+		for _, prefix := range s.cfg.Constants.Sirene.TechNafPrefixes {
 			if strings.HasPrefix(cleanNAF, prefix) {
 				isTech = true
 				break
@@ -193,12 +183,12 @@ func (s *SireneCollector) Scan(ctx context.Context, departments []string, minHea
 
 		c := &db.Company{
 			Name:           cleanCompanyName(nameRaw),
-			Siren:          db.ToNullString(siren),
-			NAFCode:        db.ToNullString(naf),
-			NAFLabel:       db.ToNullString(NAF_LABELS[cleanNAF]),
-			City:           db.ToNullString(city),
-			Department:     db.ToNullString(zip[:2]),
-			HeadcountRange: db.ToNullString(headcountLabel(hcCode)),
+			Siren:          siren,
+			NAFCode:        naf,
+			NAFLabel:       s.cfg.Constants.Sirene.NafLabels[cleanNAF],
+			City:           city,
+			Department:     zip[:2],
+			HeadcountRange: s.headcountLabel(hcCode),
 			CompanyType:    companyType,
 			Status:         status,
 		}
@@ -220,23 +210,15 @@ func (s *SireneCollector) Scan(ctx context.Context, departments []string, minHea
 	return totalFound, newAdded, nil
 }
 
-func getMinHeadcount(code string) int {
-	m := map[string]int{
-		"03": 6, "11": 10, "12": 20, "21": 50, "22": 100,
-		"31": 200, "32": 250, "41": 500, "42": 1000,
-		"51": 2000, "52": 5000, "53": 10000,
+func (s *SireneCollector) getMinHeadcount(code string) int {
+	if val, ok := s.cfg.Constants.Sirene.HeadcountLevels[code]; ok {
+		return val
 	}
-	return m[code]
+	return 0
 }
 
-func headcountLabel(code string) string {
-	labels := map[string]string{
-		"NN": "0", "00": "0", "01": "1-2", "02": "3-5", "03": "6-9",
-		"11": "10-19", "12": "20-49", "21": "50-99", "22": "100-199",
-		"31": "200-249", "32": "250-499", "41": "500-999", "42": "1000-1999",
-		"51": "2000-4999", "52": "5000-9999", "53": "10000+",
-	}
-	if l, ok := labels[code]; ok {
+func (s *SireneCollector) headcountLabel(code string) string {
+	if l, ok := s.cfg.Constants.Sirene.HeadcountLabels[code]; ok {
 		return l
 	}
 	return code

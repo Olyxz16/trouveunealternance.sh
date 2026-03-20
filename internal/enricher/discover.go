@@ -290,8 +290,8 @@ func (d *URLDiscoverer) SearchPeopleOnLinkedIn(ctx context.Context, comp db.Comp
 
 func (d *URLDiscoverer) discoverPeopleWithGemini(ctx context.Context, comp db.Company, titles []string) ([]IndividualContact, error) {
 	city := comp.City
-	if city == "" || city == "CHASSENEUIL-DU-POITOU" {
-		city = "Poitiers"
+	if city == "" {
+		return nil, fmt.Errorf("missing city for company %s", comp.Name)
 	}
 
 	prompt := fmt.Sprintf(

@@ -39,8 +39,6 @@ func InitProviders(primaryName, fallbackName string, cfg interface {
 			return NewOpenRouterProvider(cfg.GetOpenRouterAPIKey(), cfg.GetOpenRouterModel())
 		case "gemini_api":
 			return NewGeminiAPIProvider(cfg.GetGeminiAPIKey(), cfg.GetGeminiAPIModel())
-		case "gemini_cli":
-			return NewGeminiCLIProvider(cfg.GetGeminiCLIPath())
 		default:
 			return nil
 		}

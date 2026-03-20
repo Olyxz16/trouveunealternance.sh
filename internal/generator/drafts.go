@@ -82,6 +82,7 @@ func (g *Generator) GenerateForContact(ctx context.Context, profile Profile, com
 		return DraftSet{}, fmt.Errorf("contact %d not found", contactID)
 	}
 
+	// TODO: Handle marshaling error properly when drafting logic is finalized.
 	projectsJSON, _ := json.Marshal(profile.Projects)
 
 	req := llm.CompletionRequest{

@@ -6,10 +6,10 @@ import (
 	"fmt"
 	"jobhunter/internal/db"
 	"jobhunter/internal/errors"
-	"log"
 	"strings"
 	"time"
 
+	"go.uber.org/zap"
 	"golang.org/x/time/rate"
 )
 
@@ -18,14 +18,19 @@ type Client struct {
 	fallback Provider
 	limiter  *rate.Limiter
 	db       *db.DB
+	logger   *zap.Logger
 }
 
-func NewClient(provider Provider, fallback Provider, rpm int, database *db.DB) *Client {
+func NewClient(provider Provider, fallback Provider, rpm int, database *db.DB, logger *zap.Logger) *Client {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 	return &Client{
 		provider: provider,
 		fallback: fallback,
 		limiter:  rate.NewLimiter(rate.Every(time.Minute/time.Duration(rpm)), 1),
 		db:       database,
+		logger:   logger,
 	}
 }
 
@@ -63,7 +68,12 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runI
 		}
 
 		if shouldRetry && i < maxRetries {
-			log.Printf("Primary LLM %s failed (attempt %d/%d), retrying in %v: %v", c.provider.Name(), i+1, maxRetries+1, backoff, err)
+			c.logger.Warn("Primary LLM failed, retrying",
+				zap.String("provider", c.provider.Name()),
+				zap.Int("attempt", i+1),
+				zap.Duration("backoff", backoff),
+				zap.Error(err))
+			
 			select {
 			case <-ctx.Done():
 				return CompletionResponse{}, ctx.Err()
@@ -77,7 +87,10 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runI
 
 	// 2. Try Fallback if primary failed
 	if c.fallback != nil {
-		log.Printf("Primary LLM provider failed, trying fallback %s: %v", c.fallback.Name(), lastErr)
+		c.logger.Info("Primary LLM failed, trying fallback",
+			zap.String("fallback", c.fallback.Name()),
+			zap.Error(lastErr))
+		
 		// Per-attempt timeout for fallback too
 		attemptCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 		resp, err := c.fallback.Complete(attemptCtx, req)
@@ -156,10 +169,7 @@ func (c *Client) CompleteJSON(ctx context.Context, req CompletionRequest, task, 
 	if err := json.Unmarshal([]byte(cleanJSON), target); err != nil {
 		// Attempt fallback for array-to-struct if applicable
 		if strings.HasPrefix(cleanJSON, "[") {
-			log.Printf("DEBUG: JSON is array, target is %T. Attempting wrapping...", target)
-			// This is tricky without knowing the field name. 
-			// But most our structures use "contacts" for people.
-			// Let's try to detect if it's PeoplePageData or similar.
+			c.logger.Debug("JSON is array, attempting wrapping", zap.String("target_type", fmt.Sprintf("%T", target)))
 			if strings.Contains(fmt.Sprintf("%T", target), "PeoplePageData") {
 				wrapped := fmt.Sprintf(`{"contacts": %s}`, cleanJSON)
 				if err2 := json.Unmarshal([]byte(wrapped), target); err2 == nil {
@@ -168,7 +178,8 @@ func (c *Client) CompleteJSON(ctx context.Context, req CompletionRequest, task, 
 			}
 		}
 
-		log.Printf("JSON unmarshal failed, retrying once with error feedback: %v", err)
+		c.logger.Warn("JSON unmarshal failed, retrying with error feedback", zap.Error(err))
+		
 		req.User = fmt.Sprintf("%s\n\nYour previous response was not valid JSON: %s\nError: %v\nPlease return ONLY the valid JSON object.", req.User, resp.Content, err)
 		
 		resp, err = c.Complete(ctx, req, task, runID)
@@ -203,6 +214,6 @@ func (c *Client) logUsage(resp CompletionResponse, task, runID string) {
 
 	err := c.db.InsertTokenUsage(usage)
 	if err != nil {
-		log.Printf("Failed to log unified token usage: %v", err)
+		c.logger.Error("Failed to log token usage", zap.Error(err))
 	}
 }

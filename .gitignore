@@ -4,3 +4,7 @@ data/
 logs/
 *.log
 data/browser_session.json
+jobhunter
+bin/
+*.exe
+*.test

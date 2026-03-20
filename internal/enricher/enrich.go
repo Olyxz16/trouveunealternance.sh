@@ -455,6 +455,7 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
+// TODO: Improve hallucination detection logic to be more robust than hardcoded names.
 func isHallucinated(c IndividualContact) bool {
 	hallucinatedFullNames := []string{
 		"john doe", "jane smith",
