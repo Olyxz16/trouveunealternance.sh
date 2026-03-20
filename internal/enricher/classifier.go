@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"jobhunter/internal/db"
 	"jobhunter/internal/llm"
-	"log"
 	"strings"
 )
 
@@ -62,6 +61,18 @@ func (c *Classifier) GetDB() *db.DB {
 	return c.db
 }
 
+func (c *Classifier) ExtractInterestingLinks(ctx context.Context, markdown string, runID string) ([]string, error) {
+	var result struct {
+		Links []string `json:"links"`
+	}
+	req := llm.CompletionRequest{
+		System: "Extract URLs from the provided text that are likely to contain contact information, about us, or recruitment details. Return ONLY a JSON object with a 'links' field.",
+		User:   fmt.Sprintf("Markdown:\n\n%s", markdown),
+	}
+	err := c.llm.CompleteJSON(ctx, req, "extract_links", runID, &result)
+	return result.Links, err
+}
+
 const SearchDiscoveryPrompt = `You are extracting the official company website and LinkedIn company page from search engine results.
 
 Company Context:
@@ -99,7 +110,7 @@ Return a JSON object with a single field "contacts" containing the list.`
 func (c *Classifier) ExtractPeopleFromSearchResults(ctx context.Context, markdown string, comp db.Company, runID string) (PeoplePageData, error) {
 	var result PeoplePageData
 	req := llm.CompletionRequest{
-		System: fmt.Sprintf(PeopleSearchExtractionPrompt, comp.Name, comp.City.String),
+		System: fmt.Sprintf(PeopleSearchExtractionPrompt, comp.Name, comp.City),
 		User:   fmt.Sprintf("Search results (Markdown):\n\n%s", markdown),
 	}
 	err := c.llm.CompleteJSON(ctx, req, "extract_people_from_search", runID, &result)
@@ -113,7 +124,7 @@ func (c *Classifier) ExtractURLsFromSearch(ctx context.Context, searchResultMD s
 	}
 	var res searchResult
 	req := llm.CompletionRequest{
-		System: fmt.Sprintf(SearchDiscoveryPrompt, comp.Name, comp.City.String, comp.Siren.String),
+		System: fmt.Sprintf(SearchDiscoveryPrompt, comp.Name, comp.City, comp.Siren),
 		User:   fmt.Sprintf("Search results (Markdown):\n\n%s", searchResultMD),
 	}
 	err := c.llm.CompleteJSON(ctx, req, "extract_urls_from_search", runID, &res)
@@ -130,10 +141,10 @@ NAF: %s - %s
 City: %s
 Size: %s employees%s`,
 		comp.Name,
-		comp.NAFCode.String,
-		comp.NAFLabel.String,
-		comp.City.String,
-		comp.HeadcountRange.String,
+		comp.NAFCode,
+		comp.NAFLabel,
+		comp.City,
+		comp.HeadcountRange,
 		currentInfo,
 	)
 
@@ -148,60 +159,14 @@ Size: %s employees%s`,
 		return CompanyScore{}, err
 	}
 
-	// Normalize CompanyType to match DB constraint
-	score.CompanyType = strings.ToUpper(strings.ReplaceAll(score.CompanyType, "-", "_"))
-	
-	// Validate against allowed values to avoid DB error
-	switch score.CompanyType {
-	case "TECH", "TECH_ADJACENT", "NON_TECH":
-		// OK
-	default:
-		log.Printf("Warning: LLM returned invalid company_type '%s', defaulting to UNKNOWN", score.CompanyType)
-		score.CompanyType = "UNKNOWN"
-	}
-
-	// Apply caps and defaults from PLAN.md
-	if score.CompanyType == "TECH_ADJACENT" && score.RelevanceScore > 7 {
-		score.RelevanceScore = 7
-	}
-
-	// Update DB
-	updates := map[string]interface{}{
+	// Update DB with score and reasoning
+	err = c.db.UpdateCompany(comp.ID, map[string]interface{}{
 		"relevance_score":         score.RelevanceScore,
 		"company_type":            score.CompanyType,
 		"has_internal_tech_team":  score.HasInternalTechTeam,
-		"tech_team_signals":      strings.Join(score.TechTeamSignals, ", "),
-		"notes":                   fmt.Sprintf("%s | %s", comp.Notes.String, score.Reasoning),
-		"status":                  "NEW",
-	}
+		"tech_team_signals":       strings.Join(score.TechTeamSignals, ", "),
+		"notes":                   fmt.Sprintf("%s | %s", comp.Notes, score.Reasoning),
+	})
 
-	if score.CompanyType == "NON_TECH" {
-		updates["status"] = "NOT_TECH"
-	}
-
-	err = c.db.UpdateCompany(comp.ID, updates)
-	if err != nil {
-		return score, fmt.Errorf("failed to update company in DB: %w", err)
-	}
-
-	return score, nil
-}
-
-const LinkDiscoveryPrompt = `You are identifying interesting links on a company website to find recruitment or team information.
-
-LOOK FOR:
-- Careers, Jobs, "Nous rejoindre", "Recrutement"
-- Team, "L'équipe", "Qui sommes-nous ?", "About us"
-- Contact, "Nous contacter"
-
-Return a JSON array of relative or absolute URLs. Focus on the TOP 3 most relevant links.`
-
-func (c *Classifier) ExtractInterestingLinks(ctx context.Context, markdown string, runID string) ([]string, error) {
-	var links []string
-	req := llm.CompletionRequest{
-		System: LinkDiscoveryPrompt,
-		User:   fmt.Sprintf("Website content (Markdown):\n\n%s", markdown),
-	}
-	err := c.llm.CompleteJSON(ctx, req, "extract_links", runID, &links)
-	return links, err
+	return score, err
 }

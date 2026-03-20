@@ -1,208 +1,109 @@
 package db
 
 import (
-	"database/sql"
-	"embed"
 	"fmt"
+	"jobhunter/internal/config"
 	"log"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
+	"time"
 
-	_ "modernc.org/sqlite"
+	"gorm.io/driver/postgres"
+	"gorm.io/driver/sqlite"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
-//go:embed migrations/*.sql
-var migrationsFS embed.FS
-
 type DB struct {
-	*sql.DB
+	*gorm.DB
 }
 
+// NewDB initializes a GORM database connection based on config.
+func NewDB(cfg *config.Config) (*DB, error) {
+	var dialector gorm.Dialector
+
+	// For now, we assume DBType is either "sqlite" (default) or "postgres".
+	// We'll add DBType to config later.
+	dbType := os.Getenv("DB_TYPE")
+	if dbType == "" {
+		dbType = "sqlite"
+	}
+
+	switch dbType {
+	case "postgres":
+		dsn := os.Getenv("DATABASE_URL")
+		if dsn == "" {
+			return nil, fmt.Errorf("DATABASE_URL must be set for postgres")
+		}
+		dialector = postgres.Open(dsn)
+	default:
+		// Ensure directory exists
+		dir := filepath.Dir(cfg.DBPath)
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create db directory: %w", err)
+		}
+		dialector = sqlite.Open(cfg.DBPath)
+	}
+
+	db, err := gorm.Open(dialector, &gorm.Config{
+		Logger: logger.Default.LogMode(logger.Silent),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to open database: %w", err)
+	}
+
+	log.Printf("Connected to %s database", dbType)
+
+	return &DB{db}, nil
+}
+
+// Migrate performs the auto-migration for all models.
+func (db *DB) Migrate() error {
+	return db.AutoMigrate(
+		&Company{},
+		&Contact{},
+		&Job{},
+		&Draft{},
+		&PipelineRun{},
+		&RunLog{},
+		&ScrapeCache{},
+		&TokenUsage{},
+	)
+}
+
+// Stats holds database statistics.
 type Stats struct {
-	TotalJobs          int
-	NewJobsToday       int
-	JobsByStatus       map[string]int
-	JobsByType         map[string]int
-	TotalProspects     int
-	NewProspectsToday  int
-	ProspectsByStatus  map[string]int
+	TotalJobs          int64
+	NewJobsToday       int64
+	TotalProspects     int64
+	NewProspectsToday  int64
+	ProspectsByStatus  map[string]int64
 }
 
 func (db *DB) GetStats() (Stats, error) {
 	var s Stats
-	s.JobsByStatus = make(map[string]int)
-	s.JobsByType = make(map[string]int)
-	s.ProspectsByStatus = make(map[string]int)
+	s.ProspectsByStatus = make(map[string]int64)
 
-	err := db.QueryRow("SELECT COUNT(*) FROM jobs").Scan(&s.TotalJobs)
-	if err != nil {
-		return s, err
+	db.Model(&Job{}).Count(&s.TotalJobs)
+	db.Model(&Job{}).Where("date_found = ?", time.Now().Format("2006-01-02")).Count(&s.NewJobsToday)
+
+	db.Model(&Company{}).Count(&s.TotalProspects)
+	db.Model(&Company{}).Where("date_found = ?", time.Now().Format("2006-01-02")).Count(&s.NewProspectsToday)
+
+	// Status breakdown
+	type statusCount struct {
+		Status string
+		Count  int64
 	}
-
-	err = db.QueryRow("SELECT COUNT(*) FROM jobs WHERE date_found=date('now')").Scan(&s.NewJobsToday)
-	if err != nil {
-		return s, err
-	}
-
-	rows, err := db.Query("SELECT status, COUNT(*) FROM jobs GROUP BY status")
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var status string
-			var count int
-			if err := rows.Scan(&status, &count); err == nil {
-				s.JobsByStatus[status] = count
-			}
-		}
-	}
-
-	rows, err = db.Query("SELECT type, COUNT(*) FROM jobs GROUP BY type")
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var t string
-			var count int
-			if err := rows.Scan(&t, &count); err == nil {
-				s.JobsByType[t] = count
-			}
-		}
-	}
-
-	err = db.QueryRow("SELECT COUNT(*) FROM companies").Scan(&s.TotalProspects)
-	if err != nil {
-		return s, err
-	}
-
-	err = db.QueryRow("SELECT COUNT(*) FROM companies WHERE date_found=date('now')").Scan(&s.NewProspectsToday)
-	if err != nil {
-		return s, err
-	}
-
-	rows, err = db.Query("SELECT status, COUNT(*) FROM companies GROUP BY status")
-	if err == nil {
-		defer rows.Close()
-		for rows.Next() {
-			var status string
-			var count int
-			if err := rows.Scan(&status, &count); err == nil {
-				s.ProspectsByStatus[status] = count
-			}
-		}
+	var results []statusCount
+	db.Model(&Company{}).Select("status, count(*) as count").Group("status").Scan(&results)
+	for _, res := range results {
+		s.ProspectsByStatus[res.Status] = res.Count
 	}
 
 	return s, nil
 }
 
-func NewDB(path string) (*DB, error) {
-	// Ensure directory exists
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create db directory: %w", err)
-	}
-
-	// Connect with WAL mode and foreign keys
-	dsn := fmt.Sprintf("file:%s?_pragma=journal_mode(WAL)&_pragma=foreign_keys(ON)", path)
-	db, err := sql.Open("sqlite", dsn)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open database: %w", err)
-	}
-
-	if err := db.Ping(); err != nil {
-		return nil, fmt.Errorf("failed to ping database: %w", err)
-	}
-
-	d := &DB{db}
-	if err := d.initMigrations(); err != nil {
-		return nil, err
-	}
-
-	return d, nil
-}
-
-func (db *DB) initMigrations() error {
-	// Create schema_migrations table if it doesn't exist
-	_, err := db.Exec(`
-		CREATE TABLE IF NOT EXISTS schema_migrations (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
-			name TEXT NOT NULL UNIQUE,
-			applied_at TEXT NOT NULL DEFAULT (datetime('now'))
-		);
-	`)
-	if err != nil {
-		return fmt.Errorf("failed to create schema_migrations table: %w", err)
-	}
-
-	entries, err := migrationsFS.ReadDir("migrations")
-	if err != nil {
-		return fmt.Errorf("failed to read migrations directory: %w", err)
-	}
-
-	var migrationFiles []string
-	for _, entry := range entries {
-		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".sql") {
-			migrationFiles = append(migrationFiles, entry.Name())
-		}
-	}
-	sort.Strings(migrationFiles)
-
-	applied := make(map[string]bool)
-	rows, err := db.Query("SELECT name FROM schema_migrations")
-	if err != nil {
-		return fmt.Errorf("failed to query applied migrations: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			return err
-		}
-		applied[name] = true
-	}
-
-	for _, name := range migrationFiles {
-		if applied[name] {
-			continue
-		}
-
-		log.Printf("Applying migration: %s", name)
-		content, err := migrationsFS.ReadFile(filepath.Join("migrations", name))
-		if err != nil {
-			return fmt.Errorf("failed to read migration %s: %w", name, err)
-		}
-
-		tx, err := db.Begin()
-		if err != nil {
-			return err
-		}
-
-		if _, err := tx.Exec(string(content)); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("failed to apply migration %s: %w", name, err)
-		}
-
-		if _, err := tx.Exec("INSERT INTO schema_migrations (name) VALUES (?)", name); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("failed to record migration %s: %w", name, err)
-		}
-
-		if err := tx.Commit(); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
-func ToNullString(s string) sql.NullString {
-	return sql.NullString{String: s, Valid: s != ""}
-}
-
-func ToNullInt64(i int64) sql.NullInt64 {
-	return sql.NullInt64{Int64: i, Valid: i != 0}
-}
-
-func ToNullBool(b bool) sql.NullBool {
-	return sql.NullBool{Bool: b, Valid: true}
+func ToNullString(s string) string {
+	return s
 }

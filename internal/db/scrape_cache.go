@@ -1,23 +1,15 @@
 package db
 
-type ScrapeCache struct {
-	ID        int     `json:"id"`
-	URL       string  `json:"url"`
-	Method    string  `json:"method"`
-	ContentMD string  `json:"content_md"`
-	Quality   float64 `json:"quality"`
-	FetchedAt string  `json:"fetched_at"`
-	ExpiresAt string  `json:"expires_at"`
-}
+import (
+	"time"
+
+	"gorm.io/gorm/clause"
+)
 
 func (db *DB) GetCache(url string) (*ScrapeCache, error) {
 	var s ScrapeCache
-	err := db.QueryRow(`
-		SELECT * FROM scrape_cache 
-		WHERE url = ? AND expires_at > datetime('now')
-	`, url).Scan(
-		&s.ID, &s.URL, &s.Method, &s.ContentMD, &s.Quality, &s.FetchedAt, &s.ExpiresAt,
-	)
+	// Check for non-expired cache. We'll use a 7-day default if not specified.
+	err := db.Where("url = ? AND created_at > ?", url, time.Now().Add(-7*24*time.Hour)).First(&s).Error
 	if err != nil {
 		return nil, err
 	}
@@ -25,15 +17,10 @@ func (db *DB) GetCache(url string) (*ScrapeCache, error) {
 }
 
 func (db *DB) SetCache(s *ScrapeCache) error {
-	_, err := db.Exec(`
-		INSERT INTO scrape_cache (url, method, content_md, quality, fetched_at, expires_at)
-		VALUES (?, ?, ?, ?, ?, ?)
-		ON CONFLICT(url) DO UPDATE SET
-			method=excluded.method,
-			content_md=excluded.content_md,
-			quality=excluded.quality,
-			fetched_at=excluded.fetched_at,
-			expires_at=excluded.expires_at
-	`, s.URL, s.Method, s.ContentMD, s.Quality, s.FetchedAt, s.ExpiresAt)
-	return err
+	if s.CreatedAt.IsZero() {
+		s.CreatedAt = time.Now()
+	}
+	return db.Clauses(clause.OnConflict{
+		UpdateAll: true,
+	}).Create(s).Error
 }

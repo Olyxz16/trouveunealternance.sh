@@ -92,21 +92,17 @@ func (s *Server) handleGetJob(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGetProspects(w http.ResponseWriter, r *http.Request) {
-	// Use GetCompaniesForEnrichment criteria or all prospects
-	rows, err := s.db.Query("SELECT id, name, city, relevance_score, status FROM companies ORDER BY relevance_score DESC")
+	var companies []db.Company
+	err := s.db.Order("relevance_score desc").Find(&companies).Error
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
 
 	var prospects []map[string]interface{}
-	for rows.Next() {
-		var id, score int
-		var name, city, status string
-		rows.Scan(&id, &name, &city, &score, &status)
+	for _, c := range companies {
 		prospects = append(prospects, map[string]interface{}{
-			"id": id, "name": name, "city": city, "relevance_score": score, "status": status,
+			"id": c.ID, "name": c.Name, "city": c.City, "relevance_score": c.RelevanceScore, "status": c.Status,
 		})
 	}
 	json.NewEncoder(w).Encode(prospects)

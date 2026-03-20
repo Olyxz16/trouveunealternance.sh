@@ -60,7 +60,7 @@ Return a JSON object with:
 }
 `
 
-func (g *Generator) GenerateDrafts(ctx context.Context, companyID int, contactID int, profile *Profile, runID string) (DraftSet, error) {
+func (g *Generator) GenerateForContact(ctx context.Context, profile Profile, companyID uint, contactID uint, runID string) (DraftSet, error) {
 	comp, err := g.db.GetCompany(companyID)
 	if err != nil {
 		return DraftSet{}, err
@@ -83,16 +83,17 @@ func (g *Generator) GenerateDrafts(ctx context.Context, companyID int, contactID
 	}
 
 	projectsJSON, _ := json.Marshal(profile.Projects)
-	
+
 	req := llm.CompletionRequest{
 		System: fmt.Sprintf(DraftGenerationPrompt,
-			comp.Name, comp.CompanyType, comp.TechStack.String,
-			targetContact.Name.String, targetContact.Role.String,
+			comp.Name, comp.CompanyType, comp.TechStack,
+			targetContact.Name, targetContact.Role,
 			profile.Name, profile.School, strings.Join(profile.Skills, ", "),
 			string(projectsJSON), profile.Availability, profile.Duration,
 		),
 		User: "Generate the drafts now.",
 	}
+
 
 	var result DraftSet
 	err = g.llm.CompleteJSON(ctx, req, "generate_drafts", runID, &result)

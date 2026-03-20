@@ -21,10 +21,11 @@ var rootCmd = &cobra.Command{
 	PersistentPreRun: func(cmd *cobra.Command, args []string) {
 		cfg = config.Load()
 		var err error
-		database, err = db.NewDB(cfg.DBPath)
+		database, err = db.NewDB(cfg)
 		if err != nil {
 			log.Fatalf("Failed to initialize database: %v", err)
 		}
+
 	},
 }
 

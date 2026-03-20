@@ -2,90 +2,87 @@ package cmd
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
+	"jobhunter/internal/db"
 	"jobhunter/internal/generator"
 	"jobhunter/internal/llm"
 	"log"
 
-	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
-var generateBatch int
-
 func init() {
-	generateCmd.Flags().IntVarP(&generateBatch, "batch", "b", 10, "Number of companies to generate drafts for")
 	rootCmd.AddCommand(generateCmd)
 }
 
 var generateCmd = &cobra.Command{
 	Use:   "generate",
-	Short: "Generate outreach drafts for companies ready to contact",
+	Short: "Generate outreach drafts for high-score prospects",
 	Run: func(cmd *cobra.Command, args []string) {
-		ctx := context.Background()
-		runID := uuid.New().String()
-
-		// 1. Load Profile
-		prof, err := generator.LoadProfile("profile.json")
+		profile, err := generator.LoadProfile("profile.json")
 		if err != nil {
-			log.Fatalf("Failed to load profile.json: %v", err)
+			log.Fatalf("Failed to load profile: %v", err)
 		}
 
-		// 2. Setup LLM
+		// Use GORM to find candidates
+		var contacts []db.Contact
+		err = database.Table("contacts").
+			Select("contacts.*").
+			Joins("JOIN companies ON companies.id = contacts.company_id").
+			Where("companies.relevance_score >= 7 AND companies.status = 'TO_CONTACT'").
+			Find(&contacts).Error
+
+		if err != nil {
+			log.Fatalf("Failed to query candidates: %v", err)
+		}
+
+		if len(contacts) == 0 {
+			fmt.Println("No candidates found for draft generation.")
+			return
+		}
+
+		fmt.Printf("Found %d candidates. Generating drafts...\n", len(contacts))
+
 		primary, fallback := llm.InitProviders(cfg.LLMPrimary, cfg.LLMFallback, cfg)
 		llmClient := llm.NewClient(primary, fallback, cfg.OpenRouterRPM, database)
-
 		gen := generator.NewGenerator(database, llmClient)
 
-		// 3. Find candidates
-		rows, err := database.Query("SELECT id, name, primary_contact_id FROM companies WHERE status = 'TO_CONTACT' LIMIT ?", generateBatch)
-		if err != nil {
-			log.Fatalf("Failed to query companies: %v", err)
-		}
-		defer rows.Close()
+		runID := fmt.Sprintf("gen_%d", len(contacts))
 
-		count := 0
-		for rows.Next() {
-			var id int
-			var name string
-			var contactID sql.NullInt64
-			if err := rows.Scan(&id, &name, &contactID); err != nil {
-				continue
-			}
-			if !contactID.Valid {
-				continue // skip companies with no primary contact
-			}
-
-			fmt.Printf("▶ Generating drafts for %s...\n", name)
-			drafts, err := gen.GenerateDrafts(ctx, id, int(contactID.Int64), prof, runID)
+		for _, c := range contacts {
+			fmt.Printf("  - Generating for %s...\n", c.Name)
+			drafts, err := gen.GenerateForContact(context.Background(), *profile, c.CompanyID, c.ID, runID)
 			if err != nil {
-				fmt.Printf("  ❌ Error: %v\n", err)
+				log.Printf("    ERROR: %v", err)
 				continue
 			}
 
-			// Save to DB (simplified for now - real version should use a db method)
-			// For V1, we just log or store in a simple way
-			// The plan mentions a drafts table from migration 007.
-			
-			_, err = database.Exec(`
-				INSERT INTO drafts (company_id, contact_id, type, subject, body, model)
-				VALUES (?, ?, 'email', ?, ?, ?)
-			`, id, int(contactID.Int64), drafts.Email.Subject, drafts.Email.Body, primary.Name())
-			
-			_, err = database.Exec(`
-				INSERT INTO drafts (company_id, contact_id, type, body, model)
-				VALUES (?, ?, 'linkedin', ?, ?)
-			`, id, int(contactID.Int64), drafts.Linkedin.Body, primary.Name())
+			// Save email draft
+			err = database.Create(&db.Draft{
+				CompanyID: c.CompanyID,
+				ContactID: &c.ID,
+				Type:      "email",
+				Subject:   drafts.Email.Subject,
+				Body:      drafts.Email.Body,
+				Status:    "pending",
+			}).Error
+			if err != nil {
+				log.Printf("    ERROR saving email: %v", err)
+			}
 
-			if err == nil {
-				fmt.Printf("  ✅ Drafts saved\n")
-				count++
-			} else {
-				fmt.Printf("  ❌ Database error: %v\n", err)
+			// Save LinkedIn draft
+			err = database.Create(&db.Draft{
+				CompanyID: c.CompanyID,
+				ContactID: &c.ID,
+				Type:      "linkedin",
+				Body:      drafts.Linkedin.Body,
+				Status:    "pending",
+			}).Error
+			if err != nil {
+				log.Printf("    ERROR saving linkedin: %v", err)
 			}
 		}
 
-		fmt.Printf("\n✓ Finished. Generated drafts for %d companies.\n", count)
+		fmt.Println("✓ Done.")
 	},
 }

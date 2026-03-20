@@ -1,11 +1,11 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
+	"jobhunter/internal/db"
 	"jobhunter/internal/guesser"
 	"log"
-	"net/url"
-	"strings"
 
 	"github.com/spf13/cobra"
 )
@@ -16,60 +16,58 @@ func init() {
 
 var guessEmailsCmd = &cobra.Command{
 	Use:   "guess-emails",
-	Short: "Try to guess missing contact emails based on name and domain",
+	Short: "Attempt to guess business emails for contacts",
 	Run: func(cmd *cobra.Command, args []string) {
-		g := guesser.NewGuesser(database)
+		var contacts []db.Contact
+		err := database.Table("contacts").
+			Select("contacts.*").
+			Joins("JOIN companies ON companies.id = contacts.company_id").
+			Where("contacts.email IS NULL OR contacts.email = ''").
+			Where("companies.website IS NOT NULL AND companies.website != ''").
+			Find(&contacts).Error
 
-		rows, err := database.Query(`
-			SELECT c.id, c.name, comp.website 
-			FROM contacts c 
-			JOIN companies comp ON c.company_id = comp.id 
-			WHERE (c.email IS NULL OR c.email = '') 
-			AND comp.website IS NOT NULL AND comp.website != ''
-		`)
 		if err != nil {
-			log.Fatalf("Query failed: %v", err)
+			log.Fatalf("Failed to query contacts: %v", err)
 		}
-		defer rows.Close()
 
-		count := 0
-		for rows.Next() {
-			var id int
-			var name, website string
-			if err := rows.Scan(&id, &name, &website); err != nil {
+		if len(contacts) == 0 {
+			fmt.Println("No contacts found needing email guessing.")
+			return
+		}
+
+		fmt.Printf("Guessing emails for %d contacts...\n", len(contacts))
+
+		g := guesser.NewEmailGuesser()
+
+		for _, c := range contacts {
+			// Need to get company for website
+			var comp db.Company
+			if err := database.First(&comp, c.CompanyID).Error; err != nil {
 				continue
 			}
 
-			// Extract domain from website
-			u, err := url.Parse(website)
+			fmt.Printf("  - Guessing for %s at %s...\n", c.Name, comp.Name)
+			email, err := g.Guess(context.Background(), c.Name, comp.Website)
 			if err != nil {
-				continue
-			}
-			domain := strings.TrimPrefix(u.Host, "www.")
-			if domain == "" {
+				log.Printf("    ERROR: %v", err)
 				continue
 			}
 
-			// Split name
-			parts := strings.Fields(name)
-			if len(parts) < 2 {
-				continue
-			}
-			first, last := parts[0], parts[1]
-
-			candidates := g.GenerateCandidates(first, last, domain)
-			if len(candidates) > 0 {
-				// For now, just take the first pattern (fn.ln@domain)
-				bestGuess := candidates[0]
-				fmt.Printf("▶ Guessed %s for %s\n", bestGuess, name)
-				
-				_, err = database.Exec("UPDATE contacts SET email = ?, confidence = 'guessed' WHERE id = ?", bestGuess, id)
-				if err == nil {
-					count++
+			if email != "" {
+				fmt.Printf("    ✓ Found: %s\n", email)
+				err = database.Model(&db.Contact{}).Where("id = ?", c.ID).Updates(map[string]interface{}{
+					"email":      email,
+					"confidence": "guessed",
+					"source":     "guessed",
+				}).Error
+				if err != nil {
+					log.Printf("    ERROR saving: %v", err)
 				}
+			} else {
+				fmt.Println("    ✗ Could not determine email pattern.")
 			}
 		}
 
-		fmt.Printf("\n✓ Finished. Guessed %d emails.\n", count)
+		fmt.Println("✓ Done.")
 	},
 }

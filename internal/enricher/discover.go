@@ -80,7 +80,7 @@ func (d *URLDiscoverer) DiscoverURLs(ctx context.Context, comp db.Company) (stri
 		d.reporter.Log(pipeline.LogMsg{Level: "WARN", Text: fmt.Sprintf("[%s] %s. Falling back to DuckDuckGo...", comp.Name, msg)})
 		
 		d.reporter.Update(pipeline.ProgressUpdate{
-			ID:     comp.ID,
+			ID:     int(comp.ID),
 			Name:   comp.Name,
 			Step:   "URL Discovery (DDG Fallback)",
 			Status: pipeline.StatusRunning,
@@ -139,9 +139,9 @@ func (d *URLDiscoverer) tryGeminiSearch(ctx context.Context, comp db.Company) (s
 	prompt := fmt.Sprintf(
 		"Company: %s\nSIREN: %s\nCity: %s\nNAF: %s\n\nFind their official website and LinkedIn company page.",
 		comp.Name,
-		comp.Siren.String,
-		comp.City.String,
-		comp.NAFCode.String,
+		comp.Siren,
+		comp.City,
+		comp.NAFCode,
 	)
 
 	resp, err := d.geminiAPI.CompleteWithSearch(ctx, llm.CompletionRequest{
@@ -174,7 +174,7 @@ func (d *URLDiscoverer) tryGeminiSearch(ctx context.Context, comp db.Company) (s
 }
 
 func (d *URLDiscoverer) discoverWithDDG(ctx context.Context, comp db.Company) (string, string, error) {
-	query := fmt.Sprintf("%s %s linkedin company", comp.Name, comp.City.String)
+	query := fmt.Sprintf("%s %s linkedin company", comp.Name, comp.City)
 	searchURL := fmt.Sprintf("https://duckduckgo.com/html/?q=%s", url.QueryEscape(query))
 
 	// Use ScrollAndFetch to ensure browser is used and page is loaded
@@ -289,7 +289,7 @@ func (d *URLDiscoverer) SearchPeopleOnLinkedIn(ctx context.Context, comp db.Comp
 }
 
 func (d *URLDiscoverer) discoverPeopleWithGemini(ctx context.Context, comp db.Company, titles []string) ([]IndividualContact, error) {
-	city := comp.City.String
+	city := comp.City
 	if city == "" || city == "CHASSENEUIL-DU-POITOU" {
 		city = "Poitiers"
 	}

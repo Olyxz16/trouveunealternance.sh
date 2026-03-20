@@ -1,178 +1,67 @@
 package db
 
 import (
-	"database/sql"
 	"time"
 )
 
-type PipelineRun struct {
-	RunID              string         `json:"run_id"`
-	StartedAt          string         `json:"started_at"`
-	FinishedAt         sql.NullString `json:"finished_at"`
-	Status             string         `json:"status"`
-	CompaniesProcessed int            `json:"companies_processed"`
-	ContactsFound      int            `json:"contacts_found"`
-	DraftsGenerated    int            `json:"drafts_generated"`
-	LLMCostUSD         float64        `json:"llm_cost_usd"`
-	ErrorCount         int            `json:"error_count"`
-}
-
-type TokenUsage struct {
-	RunID            string  `json:"run_id"`
-	Task             string  `json:"task"`
-	Model            string  `json:"model"`
-	Provider         string  `json:"provider"`
-	PromptTokens     int     `json:"prompt_tokens"`
-	CompletionTokens int     `json:"completion_tokens"`
-	CostUSD          float64 `json:"cost_usd"`
-	IsEstimated      bool    `json:"is_estimated"`
-}
-
-type RunLog struct {
-	ID         int            `json:"id"`
-	RunID      string         `json:"run_id"`
-	CompanyID  sql.NullInt64  `json:"company_id"`
-	JobID      sql.NullInt64  `json:"job_id"`
-	Step       string         `json:"step"`
-	Status     string         `json:"status"`
-	ErrorType  sql.NullString `json:"error_type"`
-	ErrorMsg   sql.NullString `json:"error_msg"`
-	DurationMS int64          `json:"duration_ms"`
-	TS         string         `json:"ts"`
-}
-
 func (db *DB) CreatePipelineRun(runID string) error {
-	_, err := db.Exec(`
-		INSERT INTO pipeline_runs (run_id, started_at, status)
-		VALUES (?, ?, 'running')
-	`, runID, time.Now().Format(time.RFC3339))
-	return err
+	run := &PipelineRun{
+		ID:        runID,
+		Status:    "running",
+		StartedAt: time.Now(),
+	}
+	return db.Create(run).Error
 }
 
 func (db *DB) FinalizePipelineRun(runID string, status string) error {
-	_, err := db.Exec(`
-		UPDATE pipeline_runs 
-		SET status = ?, finished_at = ?
-		WHERE run_id = ?
-	`, status, time.Now().Format(time.RFC3339), runID)
-	return err
+	now := time.Now()
+	return db.Model(&PipelineRun{}).Where("id = ?", runID).Updates(map[string]interface{}{
+		"status":   status,
+		"ended_at": &now,
+	}).Error
 }
 
 func (db *DB) LogStep(l *RunLog) error {
-	_, err := db.Exec(`
-		INSERT INTO run_log (run_id, company_id, job_id, step, status, error_type, error_msg, duration_ms)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`,
-		l.RunID, l.CompanyID, l.JobID, l.Step, l.Status, l.ErrorType, l.ErrorMsg, l.DurationMS,
-	)
-	return err
-}
-
-func (db *DB) InsertLLMUsage(runID, step, model string, promptTokens, completionTokens int, costUSD float64) error {
-	_, err := db.Exec(`
-		INSERT INTO llm_usage (run_id, step, model, prompt_tokens, completion_tokens, cost_usd)
-		VALUES (?, ?, ?, ?, ?, ?)
-	`, runID, step, model, promptTokens, completionTokens, costUSD)
-	return err
-}
-
-func (db *DB) InsertGeminiUsage(runID, step string, promptTokens, completionTokens int) error {
-	_, err := db.Exec(`
-		INSERT INTO gemini_usage (run_id, step, prompt_tokens, completion_tokens)
-		VALUES (?, ?, ?, ?)
-	`, runID, step, promptTokens, completionTokens)
-	return err
+	if l.StartedAt.IsZero() {
+		l.StartedAt = time.Now()
+	}
+	return db.Create(l).Error
 }
 
 func (db *DB) InsertTokenUsage(u *TokenUsage) error {
-	_, err := db.Exec(`
-		INSERT INTO token_usage (
-			run_id, task, model, provider, prompt_tokens, completion_tokens, cost_usd, is_estimated
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`,
-		u.RunID, u.Task, u.Model, u.Provider, u.PromptTokens, u.CompletionTokens, u.CostUSD, u.IsEstimated,
-	)
-	return err
+	if u.CreatedAt.IsZero() {
+		u.CreatedAt = time.Now()
+	}
+	return db.Create(u).Error
 }
 
 func (db *DB) GetRuns(limit int) ([]PipelineRun, error) {
-	rows, err := db.Query(`
-		SELECT run_id, started_at, finished_at, status, companies_processed, contacts_found, drafts_generated, llm_cost_usd, error_count 
-		FROM pipeline_runs ORDER BY started_at DESC LIMIT ?
-	`, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	var runs []PipelineRun
-	for rows.Next() {
-		var r PipelineRun
-		err := rows.Scan(&r.RunID, &r.StartedAt, &r.FinishedAt, &r.Status, &r.CompaniesProcessed, &r.ContactsFound, &r.DraftsGenerated, &r.LLMCostUSD, &r.ErrorCount)
-		if err != nil {
-			return nil, err
-		}
-		runs = append(runs, r)
-	}
-	return runs, nil
+	err := db.Order("started_at desc").Limit(limit).Find(&runs).Error
+	return runs, err
 }
 
 func (db *DB) GetRunDetails(runID string) ([]RunLog, error) {
-	rows, err := db.Query(`
-		SELECT id, run_id, company_id, job_id, step, status, error_type, error_msg, duration_ms, ts 
-		FROM run_log WHERE run_id = ? ORDER BY ts ASC
-	`, runID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
 	var logs []RunLog
-	for rows.Next() {
-		var l RunLog
-		err := rows.Scan(&l.ID, &l.RunID, &l.CompanyID, &l.JobID, &l.Step, &l.Status, &l.ErrorType, &l.ErrorMsg, &l.DurationMS, &l.TS)
-		if err != nil {
-			return nil, err
-		}
-		logs = append(logs, l)
-	}
-	return logs, nil
+	err := db.Where("run_id = ?", runID).Order("started_at asc").Find(&logs).Error
+	return logs, err
 }
 
 type UsageStats struct {
-	Requests         int     `json:"requests"`
-	PromptTokens     int     `json:"prompt_tokens"`
-	CompletionTokens int     `json:"completion_tokens"`
+	Requests         int64   `json:"requests"`
+	PromptTokens     int64   `json:"prompt_tokens"`
+	CompletionTokens int64   `json:"completion_tokens"`
 	TotalCost        float64 `json:"total_cost"`
 }
 
 func (db *DB) GetUsageToday() (UsageStats, error) {
 	var s UsageStats
+	today := time.Now().Format("2006-01-02")
 	
-	// 1. Query unified token_usage table
-	_ = db.QueryRow(`
-		SELECT COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0), COALESCE(SUM(cost_usd), 0) 
-		FROM token_usage WHERE ts >= date('now')
-	`).Scan(&s.Requests, &s.PromptTokens, &s.CompletionTokens, &s.TotalCost)
-	
-	// 2. Fallback/Legacy: Add llm_usage and gemini_usage
-	var lReq, lPrompt, lComp int
-	var lCost float64
-	_ = db.QueryRow(`
-		SELECT COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0), COALESCE(SUM(cost_usd), 0) 
-		FROM llm_usage WHERE ts >= date('now')
-	`).Scan(&lReq, &lPrompt, &lComp, &lCost)
-	
-	var gReq, gPrompt, gComp int
-	_ = db.QueryRow(`
-		SELECT COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0) 
-		FROM gemini_usage WHERE ts >= date('now')
-	`).Scan(&gReq, &gPrompt, &gComp)
-	
-	s.Requests += lReq + gReq
-	s.PromptTokens += lPrompt + gPrompt
-	s.CompletionTokens += lComp + gComp
-	s.TotalCost += lCost
+	db.Model(&TokenUsage{}).Where("date(created_at) = ?", today).Count(&s.Requests)
+	db.Model(&TokenUsage{}).Where("date(created_at) = ?", today).Select("COALESCE(SUM(prompt_tokens), 0)").Scan(&s.PromptTokens)
+	db.Model(&TokenUsage{}).Where("date(created_at) = ?", today).Select("COALESCE(SUM(completion_tokens), 0)").Scan(&s.CompletionTokens)
+	db.Model(&TokenUsage{}).Where("date(created_at) = ?", today).Select("COALESCE(SUM(cost_usd), 0)").Scan(&s.TotalCost)
 	
 	return s, nil
 }
@@ -183,36 +72,38 @@ type DayUsage struct {
 }
 
 func (db *DB) GetUsageHistory(days int) ([]DayUsage, error) {
-	rows, err := db.Query(`
-		SELECT date(ts) as day, SUM(cost_usd) as total_cost 
-		FROM llm_usage GROUP BY day ORDER BY day DESC LIMIT ?
-	`, days)
-	if err != nil {
-		return nil, err
+	var results []struct {
+		Day  string
+		Cost float64
 	}
-	defer rows.Close()
+	
+	// SQLite specific date grouping, might need adjustment for Postgres
+	db.Model(&TokenUsage{}).
+		Select("date(created_at) as day, SUM(cost_usd) as cost").
+		Group("day").
+		Order("day desc").
+		Limit(days).
+		Scan(&results)
 
-	var history []DayUsage
-	for rows.Next() {
-		var d DayUsage
-		rows.Scan(&d.Day, &d.Cost)
-		history = append(history, d)
+	history := make([]DayUsage, len(results))
+	for i, r := range results {
+		history[i] = DayUsage{Day: r.Day, Cost: r.Cost}
 	}
 	return history, nil
 }
 
 type HealthStats struct {
-	HTTPHealthy      int `json:"http_healthy"`   // was JinaHealthy
-	HTTPTotal        int `json:"http_total"`      // was JinaTotal
-	Browser24h       int `json:"browser_24h"`     // was MCP24h
-	NeedsReviewCount int `json:"needs_review_count"`
+	HTTPHealthy      int64 `json:"http_healthy"`
+	HTTPTotal        int64 `json:"http_total"`
+	Browser24h       int64 `json:"browser_24h"`
+	NeedsReviewCount int64 `json:"needs_review_count"`
 }
 
 func (db *DB) GetScrapingHealth() (HealthStats, error) {
 	var s HealthStats
-	_ = db.QueryRow("SELECT COUNT(*) FROM scrape_cache WHERE method='http' AND quality >= 0.7").Scan(&s.HTTPHealthy)
-	_ = db.QueryRow("SELECT COUNT(*) FROM scrape_cache WHERE method='http'").Scan(&s.HTTPTotal)
-	_ = db.QueryRow("SELECT COUNT(*) FROM scrape_cache WHERE method='browser' AND fetched_at >= datetime('now', '-24 hours')").Scan(&s.Browser24h)
-	_ = db.QueryRow("SELECT COUNT(*) FROM run_log WHERE status='needs_review' AND ts >= datetime('now', '-24 hours')").Scan(&s.NeedsReviewCount)
+	db.Model(&ScrapeCache{}).Where("method='http' AND quality >= 0.7").Count(&s.HTTPHealthy)
+	db.Model(&ScrapeCache{}).Where("method='http'").Count(&s.HTTPTotal)
+	db.Model(&ScrapeCache{}).Where("method='browser' AND created_at >= ?", time.Now().Add(-24*time.Hour)).Count(&s.Browser24h)
+	db.Model(&RunLog{}).Where("status='needs_review' AND started_at >= ?", time.Now().Add(-24*time.Hour)).Count(&s.NeedsReviewCount)
 	return s, nil
 }

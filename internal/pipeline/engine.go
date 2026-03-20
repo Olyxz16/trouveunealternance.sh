@@ -106,20 +106,19 @@ func (e *Engine) runStep(ctx context.Context, run *Run, step Step) StepResult {
 	duration := time.Since(start).Milliseconds()
 
 	status := "ok"
-	var errType, errMsg string
+	var errMsg string
 	if err != nil {
 		status = "error"
 		errMsg = err.Error()
-		errType = "generic" 
 		e.reporter.Log(LogMsg{Level: "ERROR", Text: fmt.Sprintf("Step %s failed: %v", step.Name, err)})
 	} else {
 		e.reporter.Log(LogMsg{Level: "INFO", Text: fmt.Sprintf("Step %s completed in %v", step.Name, time.Since(start).Round(time.Millisecond))})
 	}
 
 	logEntry.Status = status
-	logEntry.ErrorType = db.ToNullString(errType)
-	logEntry.ErrorMsg = db.ToNullString(errMsg)
-	logEntry.DurationMS = duration
+	logEntry.ErrorMsg = errMsg
+	now := time.Now()
+	logEntry.EndedAt = &now
 
 	if err := run.DB.LogStep(logEntry); err != nil {
 		log.Printf("Failed to log step %s: %v", step.Name, err)

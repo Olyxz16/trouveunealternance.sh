@@ -159,7 +159,7 @@ func scoreUnscoredWithTUI(ctx context.Context, runID string, p *tea.Program, log
 
 	for _, c := range unscored {
 		p.Send(pipeline.ProgressUpdate{
-			ID:     c.ID,
+			ID:     int(c.ID),
 			Name:   c.Name,
 			Step:   "Scoring",
 			Status: pipeline.StatusRunning,
@@ -168,7 +168,7 @@ func scoreUnscoredWithTUI(ctx context.Context, runID string, p *tea.Program, log
 		score, err := classifier.ScoreCompany(ctx, c, runID)
 		if err != nil {
 			p.Send(pipeline.ProgressUpdate{
-				ID:      c.ID,
+				ID:      int(c.ID),
 				Name:    c.Name,
 				Step:    "Failed",
 				Status:  pipeline.StatusError,
@@ -179,7 +179,7 @@ func scoreUnscoredWithTUI(ctx context.Context, runID string, p *tea.Program, log
 		}
 
 		p.Send(pipeline.ProgressUpdate{
-			ID:     c.ID,
+			ID:     int(c.ID),
 			Name:   c.Name,
 			Step:   fmt.Sprintf("Scored: %d", score.RelevanceScore),
 			Status: pipeline.StatusDone,

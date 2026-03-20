@@ -103,7 +103,7 @@ var enrichCmd = &cobra.Command{
 		// 2. Pre-flight: Get companies
 		var targetCompanies []db.Company
 		if companyID != 0 {
-			c, err := database.GetCompany(companyID)
+			c, err := database.GetCompany(uint(companyID))
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Error: Failed to get company %d: %v\n", companyID, err)
 				os.Exit(1)
@@ -219,7 +219,7 @@ var enrichCmd = &cobra.Command{
 				
 				if err != nil {
 					reporter.Update(pipeline.ProgressUpdate{
-						ID:      c.ID,
+						ID:      int(c.ID),
 						Name:    c.Name,
 						Step:    "Failed",
 						Status:  pipeline.StatusError,
@@ -228,7 +228,7 @@ var enrichCmd = &cobra.Command{
 					reporter.Log(pipeline.LogMsg{Level: "ERROR", Text: fmt.Sprintf("Failed to enrich %s: %v", c.Name, err)})
 				} else {
 					reporter.Update(pipeline.ProgressUpdate{
-						ID:     c.ID,
+						ID:     int(c.ID),
 						Name:   c.Name,
 						Step:   "Done",
 						Status: pipeline.StatusDone,
