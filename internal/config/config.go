@@ -17,9 +17,8 @@ type Config struct {
 	OpenRouterAPIKey    string `env:"OPENROUTER_API_KEY"`
 	OpenRouterModel     string `env:"OPENROUTER_MODEL" envDefault:"google/gemini-2.0-flash-lite:free"`
 	OpenRouterRPM       int    `env:"OPENROUTER_RPM" envDefault:"60"`
-	GeminiCLIPath       string `env:"GEMINI_CLI_PATH" envDefault:"gemini"`
 	LLMPrimary          string `env:"LLM_PRIMARY" envDefault:"openrouter"`
-	LLMFallback         string `env:"LLM_FALLBACK" envDefault:"gemini_cli"`
+	LLMFallback         string `env:"LLM_FALLBACK" envDefault:"openrouter"`
 	BrowserCookiesPath  string `env:"BROWSER_COOKIES_PATH"    envDefault:"data/browser_session.json"`
 	BrowserDisplay      string `env:"BROWSER_DISPLAY"         envDefault:""`
 	BrowserHeadless     bool   `env:"BROWSER_HEADLESS"        envDefault:"true"`
@@ -32,6 +31,7 @@ type Config struct {
 }
 
 type Constants struct {
+	UserAgent         string `yaml:"user_agent"`
 	QualityThresholds struct {
 		HTTPMin      float64 `yaml:"http_min"`
 		BrowserMin   float64 `yaml:"browser_min"`
@@ -60,7 +60,6 @@ func (c *Config) GetOpenRouterAPIKey() string { return c.OpenRouterAPIKey }
 func (c *Config) GetOpenRouterModel() string  { return c.OpenRouterModel }
 func (c *Config) GetGeminiAPIKey() string     { return c.GeminiAPIKey }
 func (c *Config) GetGeminiAPIModel() string   { return c.GeminiAPIModel }
-func (c *Config) GetGeminiCLIPath() string    { return c.GeminiCLIPath }
 
 func Load() *Config {
 	_ = godotenv.Load()
