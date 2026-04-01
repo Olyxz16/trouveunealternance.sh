@@ -3,6 +3,7 @@ package scraper
 import (
 	"context"
 	"errors"
+	"jobhunter/internal/config"
 	"jobhunter/internal/db"
 	"strings"
 
@@ -16,9 +17,10 @@ type CascadeFetcher struct {
 	cache        *db.DB
 	extractor    *Extractor
 	logger       *zap.Logger
+	cfg          *config.Config
 }
 
-func NewCascadeFetcher(http, browser Fetcher, forceBrowser []string, cache *db.DB, extractor *Extractor, logger *zap.Logger) *CascadeFetcher {
+func NewCascadeFetcher(http, browser Fetcher, forceBrowser []string, cache *db.DB, extractor *Extractor, logger *zap.Logger, cfg *config.Config) *CascadeFetcher {
 	return &CascadeFetcher{
 		http:         http,
 		browser:      browser,
@@ -26,6 +28,7 @@ func NewCascadeFetcher(http, browser Fetcher, forceBrowser []string, cache *db.D
 		cache:        cache,
 		extractor:    extractor,
 		logger:       logger,
+		cfg:          cfg,
 	}
 }
 
@@ -44,7 +47,7 @@ func (c *CascadeFetcher) tryFetcher(ctx context.Context, f Fetcher, url string) 
 		return FetchResult{}, err
 	}
 
-	quality := calculateQuality(markdown)
+	quality := c.calculateQuality(markdown)
 
 	res := FetchResult{
 		ContentMD: markdown,
@@ -69,12 +72,6 @@ func (c *CascadeFetcher) tryFetcher(ctx context.Context, f Fetcher, url string) 
 }
 
 func (c *CascadeFetcher) ScrollAndFetch(ctx context.Context, url string, scrolls int) (FetchResult, error) {
-	// For now, DDG and others that need scrolling will use the browser directly
-	// bypassing the normal cascade because they need specific browser interactions
-	if c.browser == nil {
-		return c.Fetch(ctx, url)
-	}
-
 	// Cache check first
 	if cached, err := c.cache.GetCache(url); err == nil && cached != nil {
 		c.logger.Info("cache hit", zap.String("url", url))
@@ -85,42 +82,42 @@ func (c *CascadeFetcher) ScrollAndFetch(ctx context.Context, url string, scrolls
 		}, nil
 	}
 
-	c.logger.Info("scrolling and fetching", zap.String("url", url), zap.Int("scrolls", scrolls))
-	
-	bf, ok := c.browser.(interface {
-		FetchWithScroll(context.Context, string, int) (string, error)
-	})
-	if !ok {
-		return c.tryFetcher(ctx, c.browser, url)
-	}
+	// Try browser with scroll if available
+	if c.browser != nil {
+		c.logger.Info("scrolling and fetching", zap.String("url", url), zap.Int("scrolls", scrolls))
 
-	html, err := bf.FetchWithScroll(ctx, url, scrolls)
-	if err != nil {
-		return FetchResult{}, err
-	}
-
-	markdown, err := c.extractor.Extract(html, url)
-	if err != nil {
-		return FetchResult{}, err
-	}
-
-	quality := calculateQuality(markdown)
-	
-	// Save to cache
-	if shouldCache(url) {
-		_ = c.cache.SetCache(&db.ScrapeCache{
-			URL:     url,
-			Method:  "browser",
-			Content: markdown,
-			Quality: quality,
+		bf, ok := c.browser.(interface {
+			FetchWithScroll(context.Context, string, int) (string, error)
 		})
+		if ok {
+			html, err := bf.FetchWithScroll(ctx, url, scrolls)
+			if err == nil {
+				markdown, err := c.extractor.Extract(html, url)
+				if err == nil {
+					quality := c.calculateQuality(markdown)
+					if quality > 0 {
+						if shouldCache(url) {
+							_ = c.cache.SetCache(&db.ScrapeCache{
+								URL:     url,
+								Method:  "browser",
+								Content: markdown,
+								Quality: quality,
+							})
+						}
+						return FetchResult{
+							ContentMD: markdown,
+							Method:    "browser",
+							Quality:   quality,
+						}, nil
+					}
+				}
+			}
+			c.logger.Debug("browser scroll fetch failed, falling back to HTTP", zap.String("url", url), zap.Error(err))
+		}
 	}
 
-	return FetchResult{
-		ContentMD: markdown,
-		Method:    "browser",
-		Quality:   quality,
-	}, nil
+	// Fallback to HTTP
+	return c.Fetch(ctx, url)
 }
 
 func (c *CascadeFetcher) Fetch(ctx context.Context, url string) (FetchResult, error) {
@@ -143,14 +140,18 @@ func (c *CascadeFetcher) Fetch(ctx context.Context, url string) (FetchResult, er
 		}
 	}
 
-	if useBrowser {
+	if useBrowser && c.browser != nil {
 		c.logger.Info("forcing browser for domain", zap.String("url", url))
-		return c.tryFetcher(ctx, c.browser, url)
+		res, err := c.tryFetcher(ctx, c.browser, url)
+		if err == nil {
+			return res, nil
+		}
+		c.logger.Warn("forced browser fetch failed, falling back to HTTP", zap.String("url", url), zap.Error(err))
 	}
 
 	// 3. Try HTTP first
 	res, err := c.tryFetcher(ctx, c.http, url)
-	if err == nil && res.Quality >= 0.7 {
+	if err == nil && res.Quality >= c.cfg.Constants.QualityThresholds.HTTPMin {
 		return res, nil
 	}
 
@@ -161,7 +162,20 @@ func (c *CascadeFetcher) Fetch(ctx context.Context, url string) (FetchResult, er
 		c.logger.Info("low quality primary result, trying fallback", zap.Float64("quality", res.Quality), zap.String("url", url))
 	}
 
-	return c.tryFetcher(ctx, c.browser, url)
+	browserRes, browserErr := c.tryFetcher(ctx, c.browser, url)
+	if browserErr != nil {
+		// Both failed — return HTTP result if it had content, otherwise error
+		if err == nil && res.Quality > 0 {
+			return res, nil
+		}
+		return FetchResult{}, browserErr
+	}
+
+	// Return whichever is better
+	if err == nil && res.Quality > browserRes.Quality {
+		return res, nil
+	}
+	return browserRes, nil
 }
 
 func shouldCache(url string) bool {
@@ -172,15 +186,39 @@ func shouldCache(url string) bool {
 	return true
 }
 
-func calculateQuality(markdown string) float64 {
+func (c *CascadeFetcher) calculateQuality(markdown string) float64 {
 	if len(markdown) < 100 {
 		return 0.1
 	}
-	if strings.Contains(markdown, "Security Check") || strings.Contains(markdown, "reCAPTCHA") {
-		return 0.0
+	lowMD := strings.ToLower(markdown)
+
+	// Anti-bot and error signals
+	errorSignals := []string{
+		"security check", "recaptcha", "robot check",
+		"404 not found", "page not found",
+		"access denied", "blocked", "please wait...",
+		"checking your browser",
 	}
-	if strings.Contains(markdown, "404 Not Found") || strings.Contains(markdown, "Page Not Found") {
-		return 0.0
+	for _, sig := range errorSignals {
+		if strings.Contains(lowMD, sig) {
+			return 0.0
+		}
 	}
-	return 1.0 // Basic heuristic
+
+	// LinkedIn-specific login wall detection
+	if strings.Contains(markdown, "linkedin.com") {
+		loginSignals := []string{
+			"agree & join linkedin",
+			"already on linkedin? sign in",
+			"new to linkedin? join now",
+			"join linkedin to see who you know",
+		}
+		for _, sig := range loginSignals {
+			if strings.Contains(lowMD, sig) {
+				return 0.05 // Very low quality, essentially a failure
+			}
+		}
+	}
+
+	return 1.0
 }

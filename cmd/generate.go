@@ -6,9 +6,10 @@ import (
 	"jobhunter/internal/db"
 	"jobhunter/internal/generator"
 	"jobhunter/internal/llm"
-	"log"
+	"os"
 
 	"github.com/spf13/cobra"
+	"go.uber.org/zap"
 )
 
 func init() {
@@ -21,7 +22,8 @@ var generateCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		profile, err := generator.LoadProfile("profile.json")
 		if err != nil {
-			log.Fatalf("Failed to load profile: %v", err)
+			zLogger.Error("Failed to load profile", zap.Error(err))
+			os.Exit(1)
 		}
 
 		// Use GORM to find candidates
@@ -33,7 +35,8 @@ var generateCmd = &cobra.Command{
 			Find(&contacts).Error
 
 		if err != nil {
-			log.Fatalf("Failed to query candidates: %v", err)
+			zLogger.Error("Failed to query candidates", zap.Error(err))
+			os.Exit(1)
 		}
 
 		if len(contacts) == 0 {
@@ -41,19 +44,19 @@ var generateCmd = &cobra.Command{
 			return
 		}
 
-		fmt.Printf("Found %d candidates. Generating drafts...\n", len(contacts))
+		zLogger.Info("Generating drafts", zap.Int("candidate_count", len(contacts)))
 
-		primary, fallback := llm.InitProviders(cfg.LLMPrimary, cfg.LLMFallback, cfg)
-		llmClient := llm.NewClient(primary, fallback, cfg.OpenRouterRPM, database)
+		primary, fallback := llm.InitProviders(cfg.LLMPrimary, cfg.LLMFallback, cfg, zLogger)
+		llmClient := llm.NewClient(primary, fallback, cfg.OpenRouterRPM, database, zLogger)
 		gen := generator.NewGenerator(database, llmClient)
 
 		runID := fmt.Sprintf("gen_%d", len(contacts))
 
 		for _, c := range contacts {
-			fmt.Printf("  - Generating for %s...\n", c.Name)
+			zLogger.Info("Generating for contact", zap.String("name", c.Name))
 			drafts, err := gen.GenerateForContact(context.Background(), *profile, c.CompanyID, c.ID, runID)
 			if err != nil {
-				log.Printf("    ERROR: %v", err)
+				zLogger.Error("Generation failed", zap.String("name", c.Name), zap.Error(err))
 				continue
 			}
 
@@ -67,7 +70,7 @@ var generateCmd = &cobra.Command{
 				Status:    "pending",
 			}).Error
 			if err != nil {
-				log.Printf("    ERROR saving email: %v", err)
+				zLogger.Error("Failed to save email draft", zap.String("contact", c.Name), zap.Error(err))
 			}
 
 			// Save LinkedIn draft
@@ -79,10 +82,10 @@ var generateCmd = &cobra.Command{
 				Status:    "pending",
 			}).Error
 			if err != nil {
-				log.Printf("    ERROR saving linkedin: %v", err)
+				zLogger.Error("Failed to save linkedin draft", zap.String("contact", c.Name), zap.Error(err))
 			}
 		}
 
-		fmt.Println("✓ Done.")
+		zLogger.Info("Draft generation complete")
 	},
 }

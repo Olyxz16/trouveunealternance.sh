@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"jobhunter/internal/config"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
 	"github.com/chromedp/cdproto/cdp"
+	"github.com/chromedp/cdproto/emulation"
 	"github.com/chromedp/cdproto/network"
 	"github.com/chromedp/cdproto/storage"
 	"github.com/chromedp/chromedp"
@@ -28,33 +30,25 @@ type cookieData struct {
 }
 
 // BrowserFetcher is a persistent chromedp session.
-// Create once at startup, reuse for all fetches, Close() at shutdown.
 type BrowserFetcher struct {
 	allocCtx    context.Context
 	allocCancel context.CancelFunc
 	ctx         context.Context
 	cancel      context.CancelFunc
-	cookies     string // path to browser_session.json
+	cookies     string
 	logger      *zap.Logger
+	cfg         *config.Config
 }
 
-// NewBrowserFetcher starts a chromedp browser and loads saved cookies.
-// display: empty string uses the current DISPLAY env var (dev/macOS).
-//
-//	":99" uses Xvfb on headless server.
-//
-// headless: false for the login command, true for pipeline runs.
-// binaryPath: empty = auto-detect chromium/chrome.
-func NewBrowserFetcher(cookiesPath, display string, headless bool, binaryPath string, logger *zap.Logger) (*BrowserFetcher, error) {
+func NewBrowserFetcher(cookiesPath, display string, headless bool, binaryPath string, logger *zap.Logger, cfg *config.Config) (*BrowserFetcher, error) {
 	opts := append(chromedp.DefaultExecAllocatorOptions[:],
 		chromedp.Flag("headless", headless),
 		chromedp.Flag("disable-blink-features", "AutomationControlled"),
 		chromedp.Flag("disable-infobars", true),
-		chromedp.Flag("no-sandbox", true),             // required in Docker/server
-		chromedp.Flag("disable-setuid-sandbox", true), // required in Docker/server
-		chromedp.Flag("disable-dev-shm-usage", true),  // prevents crashes on low-memory servers
+		chromedp.Flag("no-sandbox", true),
+		chromedp.Flag("disable-setuid-sandbox", true),
+		chromedp.Flag("disable-dev-shm-usage", true),
 		chromedp.WindowSize(1920, 1080),
-		// Use a slightly more common/modern user agent
 		chromedp.UserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"),
 	)
 
@@ -76,10 +70,9 @@ func NewBrowserFetcher(cookiesPath, display string, headless bool, binaryPath st
 		cancel:      cancel,
 		cookies:     cookiesPath,
 		logger:      logger,
+		cfg:         cfg,
 	}
 
-	// Load saved cookies if they exist. This also serves as a "warmup" 
-	// and verifies the browser started correctly.
 	if err := bf.loadCookies(); err != nil {
 		if !os.IsNotExist(err) {
 			logger.Warn("failed to load cookies", zap.Error(err))
@@ -93,23 +86,19 @@ func NewBrowserFetcher(cookiesPath, display string, headless bool, binaryPath st
 
 func (f *BrowserFetcher) Name() string { return "browser" }
 
-// Navigate opens a URL in the main persistent browser tab.
 func (f *BrowserFetcher) Navigate(ctx context.Context, url string) error {
 	f.logger.Info("browser navigating (persistent)", zap.String("url", url))
 	return chromedp.Run(f.ctx, chromedp.Navigate(url))
 }
 
-// Fetch navigates to url, waits for the page to load, and returns the full HTML.
 func (f *BrowserFetcher) Fetch(ctx context.Context, url string) (string, error) {
 	var html string
 
 	f.logger.Info("browser fetching", zap.String("url", url))
 
-	// Deriving a new context from the allocator context
-	runCtx, cancel := chromedp.NewContext(f.allocCtx)
+	runCtx, cancel := chromedp.NewContext(f.ctx)
 	defer cancel()
 
-	// Apply timeout from provided ctx if it has one, or default 60s
 	deadline, ok := ctx.Deadline()
 	var timeoutCtx context.Context
 	var timeoutCancel context.CancelFunc
@@ -121,11 +110,22 @@ func (f *BrowserFetcher) Fetch(ctx context.Context, url string) (string, error) 
 	defer timeoutCancel()
 
 	err := chromedp.Run(timeoutCtx,
+		network.Enable(),
+		emulation.SetUserAgentOverride(f.cfg.Constants.UserAgent),
 		chromedp.Navigate(url),
-		// Wait for body to be visible
 		chromedp.WaitVisible("body", chromedp.ByQuery),
 		chromedp.ActionFunc(func(ctx context.Context) error {
-			// Try to click multiple common cookie banner selectors
+			// Check if we were redirected to a login wall
+			var currentURL string
+			if err := chromedp.Location(&currentURL).Do(ctx); err == nil {
+				if strings.Contains(currentURL, "linkedin.com/authwall") || 
+				   strings.Contains(currentURL, "linkedin.com/login") ||
+				   strings.Contains(currentURL, "checkpoint/challenges") {
+					f.logger.Warn("LinkedIn session invalid or blocked (authwall)", zap.String("url", currentURL))
+					return fmt.Errorf("linkedin authwall detected: %s", currentURL)
+				}
+			}
+			
 			selectors := []string{
 				`button[data-control-name="ga-cookie.accept_all"]`,
 				`button#onetrust-accept-btn-handler`,
@@ -137,13 +137,12 @@ func (f *BrowserFetcher) Fetch(ctx context.Context, url string) (string, error) 
 				var nodes []*cdp.Node
 				if err := chromedp.Nodes(sel, &nodes, chromedp.AtLeast(0)).Do(ctx); err == nil && len(nodes) > 0 {
 					_ = chromedp.Click(sel, chromedp.ByQuery).Do(ctx)
-					time.Sleep(500 * time.Millisecond)
+					time.Sleep(f.cfg.Constants.Delays.CookieClick)
 				}
 			}
 			return nil
 		}),
-		// Additional sleep to let things settle
-		chromedp.Sleep(3000*time.Millisecond),
+		chromedp.Sleep(f.cfg.Constants.Delays.BrowserSettle),
 		chromedp.OuterHTML("html", &html, chromedp.ByQuery),
 	)
 	if err != nil {
@@ -152,7 +151,6 @@ func (f *BrowserFetcher) Fetch(ctx context.Context, url string) (string, error) 
 
 	f.logger.Info("browser fetch success", zap.String("url", url), zap.Int("html_len", len(html)))
 
-	// Save cookies after each successful fetch to keep session fresh
 	if err := f.saveCookies(); err != nil {
 		f.logger.Warn("failed to save cookies", zap.Error(err))
 	}
@@ -160,9 +158,8 @@ func (f *BrowserFetcher) Fetch(ctx context.Context, url string) (string, error) 
 	return html, nil
 }
 
-// Scroll scrolls the page down to trigger lazy loading.
 func (f *BrowserFetcher) Scroll(ctx context.Context, times int) error {
-	runCtx, cancel := chromedp.NewContext(f.allocCtx)
+	runCtx, cancel := chromedp.NewContext(f.ctx)
 	defer cancel()
 
 	deadline, ok := ctx.Deadline()
@@ -187,14 +184,12 @@ func (f *BrowserFetcher) Scroll(ctx context.Context, times int) error {
 	return nil
 }
 
-// FetchWithScroll navigates to url, scrolls down multiple times, and returns the full HTML.
-// This is essential for sites like LinkedIn that lazy-load content.
 func (f *BrowserFetcher) FetchWithScroll(ctx context.Context, url string, scrolls int) (string, error) {
 	var html string
 
 	f.logger.Info("browser fetching with scroll", zap.String("url", url), zap.Int("scrolls", scrolls))
 
-	runCtx, cancel := chromedp.NewContext(f.allocCtx)
+	runCtx, cancel := chromedp.NewContext(f.ctx)
 	defer cancel()
 
 	deadline, ok := ctx.Deadline()
@@ -208,9 +203,22 @@ func (f *BrowserFetcher) FetchWithScroll(ctx context.Context, url string, scroll
 	defer timeoutCancel()
 
 	actions := []chromedp.Action{
+		network.Enable(),
+		emulation.SetUserAgentOverride(f.cfg.Constants.UserAgent),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
 		chromedp.ActionFunc(func(ctx context.Context) error {
+			// Check if we were redirected to a login wall
+			var currentURL string
+			if err := chromedp.Location(&currentURL).Do(ctx); err == nil {
+				if strings.Contains(currentURL, "linkedin.com/authwall") || 
+				   strings.Contains(currentURL, "linkedin.com/login") ||
+				   strings.Contains(currentURL, "checkpoint/challenges") {
+					f.logger.Warn("LinkedIn session invalid or blocked (authwall)", zap.String("url", currentURL))
+					return fmt.Errorf("linkedin authwall detected: %s", currentURL)
+				}
+			}
+			
 			selectors := []string{
 				`button[data-control-name="ga-cookie.accept_all"]`,
 				`button#onetrust-accept-btn-handler`,
@@ -222,26 +230,23 @@ func (f *BrowserFetcher) FetchWithScroll(ctx context.Context, url string, scroll
 				var nodes []*cdp.Node
 				if err := chromedp.Nodes(sel, &nodes, chromedp.AtLeast(0)).Do(ctx); err == nil && len(nodes) > 0 {
 					_ = chromedp.Click(sel, chromedp.ByQuery).Do(ctx)
-					time.Sleep(500 * time.Millisecond)
+					time.Sleep(f.cfg.Constants.Delays.CookieClick)
 				}
 			}
 			return nil
 		}),
-		chromedp.Sleep(3000 * time.Millisecond),
-		// Random mouse movement
+		chromedp.Sleep(f.cfg.Constants.Delays.BrowserSettle),
 		chromedp.MouseEvent("mouseMoved", 150, 150),
 	}
 
-	// Add scroll actions with more variance
 	for i := 0; i < scrolls; i++ {
 		actions = append(actions,
 			chromedp.Evaluate(`window.scrollTo(0, document.body.scrollHeight * (0.4 + Math.random()*0.5))`, nil),
-			chromedp.Sleep(time.Duration(2000+i*500)*time.Millisecond),
+			chromedp.Sleep(f.cfg.Constants.Delays.ScrollBase+time.Duration(i)*f.cfg.Constants.Delays.ScrollVariance),
 			chromedp.MouseEvent("mouseMoved", 200+float64(i)*20, 200+float64(i)*20),
 		)
 	}
 
-	// Final extraction
 	actions = append(actions, chromedp.OuterHTML("html", &html, chromedp.ByQuery))
 
 	err := chromedp.Run(timeoutCtx, actions...)
@@ -258,21 +263,16 @@ func (f *BrowserFetcher) FetchWithScroll(ctx context.Context, url string, scroll
 	return html, nil
 }
 
-// Close shuts down the browser gracefully and saves cookies one final time.
 func (f *BrowserFetcher) Close() {
 	_ = f.saveCookies()
 	f.cancel()
 	f.allocCancel()
 }
 
-// SaveCookiesManual triggers a manual save of current browser cookies to the session file.
 func (f *BrowserFetcher) SaveCookiesManual() error {
 	return f.saveCookies()
 }
 
-// HasCookie returns true if a cookie with the given name and domain exists
-// in the current browser session. Used by the login command to detect
-// successful authentication without fetching a page.
 func (f *BrowserFetcher) HasCookie(name, domain string) (bool, error) {
 	var found bool
 	err := chromedp.Run(f.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
@@ -291,7 +291,6 @@ func (f *BrowserFetcher) HasCookie(name, domain string) (bool, error) {
 	return found, err
 }
 
-// loadCookies reads the session file and injects cookies into the browser.
 func (f *BrowserFetcher) loadCookies() error {
 	data, err := os.ReadFile(f.cookies)
 	if err != nil {
@@ -304,15 +303,29 @@ func (f *BrowserFetcher) loadCookies() error {
 	}
 
 	return chromedp.Run(f.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
+		// Enable network domain to ensure cookies can be set
+		if err := network.Enable().Do(ctx); err != nil {
+			return err
+		}
+
+		// Optional: Navigate to a neutral page on the domain to "warm up"
+		// This can help Chrome associate cookies more reliably
+		_ = chromedp.Navigate("https://www.linkedin.com/robots.txt").Do(ctx)
+
 		for _, c := range cookies {
-			expr := cdp.TimeSinceEpoch(time.Unix(int64(c.Expires), 0))
-			if err := network.SetCookie(c.Name, c.Value).
+			call := network.SetCookie(c.Name, c.Value).
 				WithDomain(c.Domain).
 				WithPath(c.Path).
 				WithHTTPOnly(c.HTTPOnly).
-				WithSecure(c.Secure).
-				WithExpires(&expr).
-				Do(ctx); err != nil {
+				WithSecure(c.Secure)
+			
+			// Only set expires if it's a future date and not a session cookie (0 or -1)
+			if c.Expires > 0 {
+				expr := cdp.TimeSinceEpoch(time.Unix(int64(c.Expires), 0))
+				call = call.WithExpires(&expr)
+			}
+
+			if err := call.Do(ctx); err != nil {
 				f.logger.Warn("failed to set cookie",
 					zap.String("name", c.Name),
 					zap.Error(err))
@@ -322,11 +335,11 @@ func (f *BrowserFetcher) loadCookies() error {
 	}))
 }
 
-// saveCookies reads all cookies from the browser and writes them to the session file.
 func (f *BrowserFetcher) saveCookies() error {
 	var cookies []*network.Cookie
 	if err := chromedp.Run(f.ctx, chromedp.ActionFunc(func(ctx context.Context) error {
 		var err error
+		// Use storage.GetCookies to get ALL cookies from the browser.
 		cookies, err = storage.GetCookies().Do(ctx)
 		return err
 	})); err != nil {
@@ -356,5 +369,5 @@ func (f *BrowserFetcher) saveCookies() error {
 		return err
 	}
 
-	return os.WriteFile(f.cookies, data, 0600) // 0600 = owner read/write only
+	return os.WriteFile(f.cookies, data, 0600)
 }

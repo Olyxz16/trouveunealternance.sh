@@ -3,11 +3,11 @@ package db
 import (
 	"fmt"
 	"jobhunter/internal/config"
-	"log"
 	"os"
 	"path/filepath"
 	"time"
 
+	"go.uber.org/zap"
 	"gorm.io/driver/postgres"
 	"gorm.io/driver/sqlite"
 	"gorm.io/gorm"
@@ -16,14 +16,16 @@ import (
 
 type DB struct {
 	*gorm.DB
+	logger *zap.Logger
 }
 
 // NewDB initializes a GORM database connection based on config.
-func NewDB(cfg *config.Config) (*DB, error) {
+func NewDB(cfg *config.Config, zapLogger *zap.Logger) (*DB, error) {
+	if zapLogger == nil {
+		zapLogger = zap.NewNop()
+	}
 	var dialector gorm.Dialector
 
-	// For now, we assume DBType is either "sqlite" (default) or "postgres".
-	// We'll add DBType to config later.
 	dbType := os.Getenv("DB_TYPE")
 	if dbType == "" {
 		dbType = "sqlite"
@@ -37,7 +39,6 @@ func NewDB(cfg *config.Config) (*DB, error) {
 		}
 		dialector = postgres.Open(dsn)
 	default:
-		// Ensure directory exists
 		dir := filepath.Dir(cfg.DBPath)
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return nil, fmt.Errorf("failed to create db directory: %w", err)
@@ -52,9 +53,9 @@ func NewDB(cfg *config.Config) (*DB, error) {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	log.Printf("Connected to %s database", dbType)
+	zapLogger.Info("Connected to database", zap.String("type", dbType))
 
-	return &DB{db}, nil
+	return &DB{db, zapLogger}, nil
 }
 
 // Migrate performs the auto-migration for all models.
@@ -102,8 +103,4 @@ func (db *DB) GetStats() (Stats, error) {
 	}
 
 	return s, nil
-}
-
-func ToNullString(s string) string {
-	return s
 }

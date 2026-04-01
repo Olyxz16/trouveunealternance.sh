@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"go.uber.org/zap"
 )
 
 type CompletionRequest struct {
@@ -31,14 +32,13 @@ func InitProviders(primaryName, fallbackName string, cfg interface {
 	GetOpenRouterModel() string
 	GetGeminiAPIKey() string
 	GetGeminiAPIModel() string
-	GetGeminiCLIPath() string
-}) (Provider, Provider) {
+}, logger *zap.Logger) (Provider, Provider) {
 	create := func(name string) Provider {
 		switch name {
 		case "openrouter":
-			return NewOpenRouterProvider(cfg.GetOpenRouterAPIKey(), cfg.GetOpenRouterModel())
+			return NewOpenRouterProvider(cfg.GetOpenRouterAPIKey(), cfg.GetOpenRouterModel(), logger)
 		case "gemini_api":
-			return NewGeminiAPIProvider(cfg.GetGeminiAPIKey(), cfg.GetGeminiAPIModel())
+			return NewGeminiAPIProvider(cfg.GetGeminiAPIKey(), cfg.GetGeminiAPIModel(), logger)
 		default:
 			return nil
 		}

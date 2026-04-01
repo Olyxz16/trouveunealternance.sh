@@ -33,6 +33,7 @@ var loginCmd = &cobra.Command{
 			false, // headed
 			cfg.BrowserBinaryPath,
 			logger,
+			cfg,
 		)
 		if err != nil {
 			log.Fatalf("Failed to start browser: %v", err)

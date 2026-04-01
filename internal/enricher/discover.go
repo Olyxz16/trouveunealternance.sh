@@ -73,8 +73,19 @@ Return ONLY a JSON object:
 }`
 
 // DiscoverURLs returns (website, linkedinURL, error).
-// Tries Gemini search grounding first, falls back to DuckDuckGo.
+// Tries LLM knowledge first, then Gemini search grounding, then DuckDuckGo.
 func (d *URLDiscoverer) DiscoverURLs(ctx context.Context, comp db.Company) (string, string, error) {
+	// 1. Try LLM direct knowledge (no search needed for known companies)
+	website, linkedin, err := d.discoverWithLLM(ctx, comp)
+	if err == nil && (website != "" || linkedin != "") {
+		d.logger.Debug("LLM discovery success",
+			zap.String("company", comp.Name),
+			zap.String("website", website),
+			zap.String("linkedin", linkedin))
+		return website, linkedin, nil
+	}
+
+	// 2. Try Gemini search grounding if available
 	if d.geminiAPI != nil {
 		website, linkedin, err := d.discoverWithGemini(ctx, comp)
 		if err == nil && (website != "" || linkedin != "") {
@@ -99,12 +110,40 @@ func (d *URLDiscoverer) DiscoverURLs(ctx context.Context, comp db.Company) (stri
 			Status: pipeline.StatusRunning,
 		})
 	}
+
+	// 3. Fall back to DuckDuckGo
 	w, l, err := d.discoverWithDDG(ctx, comp)
 	d.logger.Debug("DDG discovery result",
 		zap.String("company", comp.Name),
 		zap.String("website", w),
 		zap.String("linkedin", l))
 	return w, l, err
+}
+
+func (d *URLDiscoverer) discoverWithLLM(ctx context.Context, comp db.Company) (string, string, error) {
+	prompt := fmt.Sprintf(
+		"Company: %s\nSIREN: %s\nCity: %s\nNAF: %s\n\nWhat is their official website and LinkedIn company page?",
+		comp.Name,
+		comp.Siren,
+		comp.City,
+		comp.NAFCode,
+	)
+
+	var result struct {
+		Website     string `json:"website"`
+		LinkedinURL string `json:"linkedin_url"`
+	}
+	req := llm.CompletionRequest{
+		System: discoverySystemPrompt,
+		User:   prompt,
+	}
+
+	err := d.classifier.llm.CompleteJSON(ctx, req, "discovery_llm", "", &result)
+	if err != nil {
+		return "", "", err
+	}
+
+	return result.Website, result.LinkedinURL, nil
 }
 
 func (d *URLDiscoverer) discoverWithGemini(ctx context.Context, comp db.Company) (string, string, error) {
@@ -196,13 +235,21 @@ func (d *URLDiscoverer) discoverWithDDG(ctx context.Context, comp db.Company) (s
 	query := fmt.Sprintf("%s %s linkedin company", comp.Name, comp.City)
 	searchURL := fmt.Sprintf("https://duckduckgo.com/html/?q=%s", url.QueryEscape(query))
 
-	// Use ScrollAndFetch to ensure browser is used and page is loaded
+	d.logger.Info("DDG search", zap.String("company", comp.Name), zap.String("url", searchURL))
 	res, err := d.fetcher.ScrollAndFetch(ctx, searchURL, 1)
 	if err != nil {
+		d.logger.Warn("DDG search failed", zap.String("company", comp.Name), zap.Error(err))
 		return "", "", fmt.Errorf("DDG search failed: %w", err)
 	}
 
+	d.logger.Debug("DDG search result", zap.String("company", comp.Name), zap.Int("content_len", len(res.ContentMD)))
+
 	website, linkedin, err := d.classifier.ExtractURLsFromSearch(ctx, res.ContentMD, comp, "discovery_ddg")
+	d.logger.Debug("DDG extraction result",
+		zap.String("company", comp.Name),
+		zap.String("website", website),
+		zap.String("linkedin", linkedin),
+		zap.Error(err))
 	if err == nil && (website != "" || linkedin != "") {
 		return website, linkedin, nil
 	}
@@ -210,9 +257,16 @@ func (d *URLDiscoverer) discoverWithDDG(ctx context.Context, comp db.Company) (s
 	// Try more general query if first one failed
 	query = fmt.Sprintf("%s linkedin company", comp.Name)
 	searchURL = fmt.Sprintf("https://duckduckgo.com/html/?q=%s", url.QueryEscape(query))
+	d.logger.Info("DDG retry search", zap.String("company", comp.Name), zap.String("url", searchURL))
 	res, err = d.fetcher.ScrollAndFetch(ctx, searchURL, 1)
 	if err == nil {
+		d.logger.Debug("DDG retry result", zap.String("company", comp.Name), zap.Int("content_len", len(res.ContentMD)))
 		w, l, err := d.classifier.ExtractURLsFromSearch(ctx, res.ContentMD, comp, "discovery_ddg_retry")
+		d.logger.Debug("DDG retry extraction",
+			zap.String("company", comp.Name),
+			zap.String("website", w),
+			zap.String("linkedin", l),
+			zap.Error(err))
 		if err == nil {
 			if website == "" {
 				website = w

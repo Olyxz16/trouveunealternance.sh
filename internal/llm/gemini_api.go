@@ -7,9 +7,10 @@ import (
 	"fmt"
 	"io"
 	"jobhunter/internal/errors"
-	"log"
 	"net/http"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 const geminiAPIBase = "https://generativelanguage.googleapis.com/v1beta/models"
@@ -18,11 +19,15 @@ type GeminiAPIProvider struct {
 	APIKey     string
 	Model      string
 	HTTPClient *http.Client
+	logger     *zap.Logger
 }
 
-func NewGeminiAPIProvider(apiKey, model string) *GeminiAPIProvider {
+func NewGeminiAPIProvider(apiKey, model string, logger *zap.Logger) *GeminiAPIProvider {
 	if model == "" {
 		model = "gemini-2.0-flash-lite"
+	}
+	if logger == nil {
+		logger = zap.NewNop()
 	}
 	return &GeminiAPIProvider{
 		APIKey: apiKey,
@@ -30,6 +35,7 @@ func NewGeminiAPIProvider(apiKey, model string) *GeminiAPIProvider {
 		HTTPClient: &http.Client{
 			Timeout: 300 * time.Second, // generous — search grounding takes time
 		},
+		logger: logger,
 	}
 }
 
@@ -94,7 +100,7 @@ func (p *GeminiAPIProvider) CompleteWithSearch(ctx context.Context, req Completi
 }
 
 func (p *GeminiAPIProvider) complete(ctx context.Context, req CompletionRequest, withSearch bool) (CompletionResponse, error) {
-	log.Printf("Gemini API call (model=%s, withSearch=%v)", p.Model, withSearch)
+	p.logger.Debug("Gemini API call", zap.String("model", p.Model), zap.Bool("with_search", withSearch))
 
 	payload := geminiRequest{
 		Contents: []geminiContent{
