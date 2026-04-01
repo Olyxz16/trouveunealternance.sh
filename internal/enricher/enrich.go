@@ -4,36 +4,47 @@ import (
 	"context"
 	"fmt"
 	"jobhunter/internal/collector"
+	"jobhunter/internal/config"
 	"jobhunter/internal/db"
 	"jobhunter/internal/llm"
 	"jobhunter/internal/pipeline"
 	"jobhunter/internal/scraper"
-	"log"
 	"strings"
+
+	"go.uber.org/zap"
 )
 
 type Enricher struct {
 	db         *db.DB
+	cfg        *config.Config
 	fetcher    *scraper.CascadeFetcher
 	classifier *Classifier
 	recherche  *collector.RechercheClient
 	geminiAPI  *llm.GeminiAPIProvider // nil if not configured
 	reporter   pipeline.Reporter
+	logger     *zap.Logger
 }
 
 func NewEnricher(
 	database *db.DB,
+	cfg *config.Config,
 	fetcher *scraper.CascadeFetcher,
 	classifier *Classifier,
 	geminiAPI *llm.GeminiAPIProvider,
+	logger *zap.Logger,
 ) *Enricher {
+	if logger == nil {
+		logger = zap.NewNop()
+	}
 	return &Enricher{
 		db:         database,
+		cfg:        cfg,
 		fetcher:    fetcher,
 		classifier: classifier,
 		recherche:  collector.NewRechercheClient(),
 		geminiAPI:  geminiAPI,
 		reporter:   pipeline.NilReporter{},
+		logger:     logger,
 	}
 }
 
@@ -66,10 +77,10 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 			Step:   "Resolving Name",
 			Status: pipeline.StatusRunning,
 		})
-		log.Printf("Resolving generic name for SIREN %s via Recherche API...", comp.Siren)
+		e.logger.Info("Resolving generic name", zap.String("siren", comp.Siren))
 		info, err := e.recherche.GetCompanyInfo(ctx, comp.Siren)
 		if err == nil {
-			log.Printf("Resolved: %s", info.Name)
+			e.logger.Info("Resolved name", zap.String("siren", comp.Siren), zap.String("name", info.Name))
 			comp.Name = info.Name
 			if comp.Website == "" && info.Website != "" {
 				comp.Website = info.Website
@@ -90,11 +101,9 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 			_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{
 				"website": website,
 			})
-			log.Printf("Recherche API: found website %s for %s", website, comp.Name)
+			e.logger.Info("Recherche API found website", zap.String("company", comp.Name), zap.String("website", website))
 		}
 	}
-
-	fmt.Printf("▶ Enriching %s...\n", comp.Name)
 
 	// 1. Discover URLs if missing
 	linkedin := comp.LinkedinURL
@@ -106,6 +115,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 			Status: pipeline.StatusRunning,
 		})
 		disc := NewURLDiscoverer(e.fetcher, e.geminiAPI, e.classifier)
+		disc.SetLogger(e.logger)
 		disc.SetReporter(e.reporter)
 		w, l, err := disc.DiscoverURLs(ctx, *comp)
 		if err == nil {
@@ -128,7 +138,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 		targetURL = website
 	}
 	if targetURL == "" {
-		log.Printf("DEBUG [%s]: No target URL (LinkedIn or Website) found after discovery", comp.Name)
+		e.logger.Debug("No target URL found after discovery", zap.String("company", comp.Name))
 		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{
 			"status": "NO_CONTACT_FOUND",
 		})
@@ -144,13 +154,21 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 	})
 	res, err := e.fetcher.Fetch(ctx, targetURL)
 	if err == nil {
-		log.Printf("DEBUG [%s]: Fetched %s: quality %.2f via %s", comp.Name, targetURL, res.Quality, res.Method)
+		e.logger.Debug("Fetched target URL",
+			zap.String("company", comp.Name),
+			zap.String("url", targetURL),
+			zap.Float64("quality", res.Quality),
+			zap.String("method", res.Method))
 	}
 
-	if err != nil || res.Quality < 0.3 {
+	if err != nil || res.Quality < e.cfg.Constants.QualityThresholds.BrowserMin {
 		if website != "" && targetURL != website {
-			log.Printf("DEBUG [%s]: low quality fetch for %s (%.2f), retrying with website %s",
-				comp.Name, targetURL, res.Quality, website)
+			e.logger.Debug("Low quality fetch, retrying with website",
+				zap.String("company", comp.Name),
+				zap.String("url", targetURL),
+				zap.Float64("quality", res.Quality),
+				zap.String("website", website))
+
 			e.reporter.Update(pipeline.ProgressUpdate{
 				ID:      int(comp.ID),
 				Name:    comp.Name,
@@ -160,11 +178,16 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 			})
 			res, err = e.fetcher.Fetch(ctx, website)
 			if err == nil {
-				log.Printf("DEBUG [%s]: Website retry result: quality %.2f via %s", comp.Name, res.Quality, res.Method)
+				e.logger.Debug("Website retry result",
+					zap.String("company", comp.Name),
+					zap.Float64("quality", res.Quality),
+					zap.String("method", res.Method))
 			}
 		}
-		if err != nil || res.Quality < 0.3 {
-			log.Printf("DEBUG [%s]: Fetch failed or quality too low (%.2f) for both LinkedIn and Website", comp.Name, res.Quality)
+		if err != nil || res.Quality < e.cfg.Constants.QualityThresholds.BrowserMin {
+			e.logger.Debug("Fetch failed or quality too low for both LinkedIn and Website",
+				zap.String("company", comp.Name),
+				zap.Float64("quality", res.Quality))
 
 			_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{
 				"status": "NO_CONTACT_FOUND",
@@ -180,13 +203,16 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 		Step:   "Extracting Info",
 		Status: pipeline.StatusRunning,
 	})
-	log.Printf("DEBUG [%s]: Extracting company info from content (length: %d)", comp.Name, len(res.ContentMD))
+	e.logger.Debug("Extracting company info", zap.String("company", comp.Name), zap.Int("content_len", len(res.ContentMD)))
 	info, err := e.classifier.ExtractCompanyInfo(ctx, res.ContentMD, runID)
 	if err != nil {
-		log.Printf("DEBUG [%s]: Company info extraction failed: %v", comp.Name, err)
+		e.logger.Error("Company info extraction failed", zap.String("company", comp.Name), zap.Error(err))
 		return fmt.Errorf("company extraction failed: %w", err)
 	}
-	log.Printf("DEBUG [%s]: Company info extracted: Type=%s, TechStack=%v", comp.Name, info.CompanyType, info.TechStack)
+	e.logger.Debug("Company info extracted",
+		zap.String("company", comp.Name),
+		zap.String("type", info.CompanyType),
+		zap.Strings("tech_stack", info.TechStack))
 
 	updates := map[string]interface{}{
 		"tech_stack":             strings.Join(info.TechStack, ", "),
@@ -207,7 +233,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 
 	// 4. Discover individuals from LinkedIn People tab
 	if linkedin == "" {
-		log.Printf("DEBUG [%s]: No LinkedIn URL available, cannot search for individuals", comp.Name)
+		e.logger.Debug("No LinkedIn URL available, cannot search for individuals", zap.String("company", comp.Name))
 		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "NO_CONTACT_FOUND"})
 		return nil
 	}
@@ -220,18 +246,20 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 	})
 	var people PeoplePageData
 	peopleURL := strings.TrimSuffix(linkedin, "/") + "/people/"
-	log.Printf("DEBUG [%s]: Fetching people from %s (with scroll)", comp.Name, peopleURL)
+	e.logger.Debug("Fetching people from LinkedIn", zap.String("company", comp.Name), zap.String("url", peopleURL))
 	peopleRes, err := e.fetcher.ScrollAndFetch(ctx, peopleURL, 3)
-	if err == nil && peopleRes.Quality >= 0.2 {
+	if err == nil && peopleRes.Quality >= e.cfg.Constants.QualityThresholds.DiscoveryMin {
 		p, err := e.classifier.ExtractPeopleFromPage(ctx, peopleRes.ContentMD, runID)
-		if err == nil {
+		if err != nil {
+			e.logger.Error("LinkedIn people extraction failed", zap.String("company", comp.Name), zap.Error(err))
+		} else {
 			people.Contacts = append(people.Contacts, p.Contacts...)
 		}
 	}
 
 	if err != nil || len(people.Contacts) == 0 {
 		if err != nil {
-			log.Printf("DEBUG [%s]: People fetch failed or no contacts: %v", comp.Name, err)
+			e.logger.Debug("People fetch failed", zap.String("company", comp.Name), zap.Error(err))
 		}
 		// Fallback to website if LinkedIn failed or no contacts found
 		if website != "" {
@@ -241,15 +269,15 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 				Step:   "Website Contact Search",
 				Status: pipeline.StatusRunning,
 			})
-			log.Printf("DEBUG [%s]: Retrying contact search on website %s", comp.Name, website)
-			
+			e.logger.Debug("Retrying contact search on website", zap.String("company", comp.Name), zap.String("website", website))
+
 			// EXPLORATION PHASE: find interesting links first
-			log.Printf("DEBUG [%s]: Exploring website for interesting links...", comp.Name)
+			e.logger.Debug("Exploring website for interesting links", zap.String("company", comp.Name))
 			mainRes, err := e.fetcher.Fetch(ctx, website)
 			if err == nil {
 				links, _ := e.classifier.ExtractInterestingLinks(ctx, mainRes.ContentMD, runID)
-				log.Printf("DEBUG [%s]: Interesting links found: %v", comp.Name, links)
-				
+				e.logger.Debug("Interesting links found", zap.String("company", comp.Name), zap.Strings("links", links))
+
 				// Try these links in order of importance
 				for _, link := range links {
 					// resolve relative URLs
@@ -262,28 +290,34 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 							target = base + link
 						}
 					}
-					
-					log.Printf("DEBUG [%s]: Visiting explored link: %s", comp.Name, target)
+
+					e.logger.Debug("Visiting explored link", zap.String("company", comp.Name), zap.String("url", target))
 					subRes, err := e.fetcher.Fetch(ctx, target)
-					if err == nil && subRes.Quality >= 0.5 {
+					if err == nil && subRes.Quality >= e.cfg.Constants.QualityThresholds.EnrichMin {
 						// Extract people from this page
-						p, _ := e.classifier.ExtractPeopleFromPage(ctx, subRes.ContentMD, runID)
-						if len(p.Contacts) > 0 {
-							log.Printf("DEBUG [%s]: Found %d contacts on %s", comp.Name, len(p.Contacts), target)
+						p, err := e.classifier.ExtractPeopleFromPage(ctx, subRes.ContentMD, runID)
+						if err != nil {
+							e.logger.Error("Website link people extraction failed", zap.String("company", comp.Name), zap.String("url", target), zap.Error(err))
+						} else if len(p.Contacts) > 0 {
+							e.logger.Info("Found contacts on website link", zap.String("company", comp.Name), zap.String("url", target), zap.Int("count", len(p.Contacts)))
 							people.Contacts = append(people.Contacts, p.Contacts...)
 						}
 					}
 				}
 			}
-			
+
 			// Final fallback to main page if no contacts found yet
-			if len(people.Contacts) == 0 && mainRes.Quality >= 0.2 {
-				p, _ := e.classifier.ExtractPeopleFromPage(ctx, mainRes.ContentMD, runID)
-				people.Contacts = append(people.Contacts, p.Contacts...)
+			if len(people.Contacts) == 0 && mainRes.Quality >= e.cfg.Constants.QualityThresholds.DiscoveryMin {
+				p, err := e.classifier.ExtractPeopleFromPage(ctx, mainRes.ContentMD, runID)
+				if err != nil {
+					e.logger.Error("Website main page people extraction failed", zap.String("company", comp.Name), zap.Error(err))
+				} else {
+					people.Contacts = append(people.Contacts, p.Contacts...)
+				}
 			}
 		}
 	}
-	
+
 	for i := range people.Contacts {
 		if isHallucinated(people.Contacts[i]) {
 			people.Contacts[i].Confidence = "hallucinated"
@@ -300,8 +334,9 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 			Step:   "External Search",
 			Status: pipeline.StatusRunning,
 		})
-		log.Printf("DEBUG [%s]: No contacts found on page, trying external search", comp.Name)
+		e.logger.Debug("No contacts found on page, trying external search", zap.String("company", comp.Name))
 		disc := NewURLDiscoverer(e.fetcher, e.geminiAPI, e.classifier)
+		disc.SetLogger(e.logger)
 		disc.SetReporter(e.reporter)
 		extContacts, err := disc.SearchPeopleOnLinkedIn(ctx, *comp, []string{"CTO", "Directeur Technique", "DevOps", "Recrutement", "RH", "Engineering Manager"})
 		if err == nil && len(extContacts) > 0 {
@@ -317,12 +352,12 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 	}
 
 	if len(people.Contacts) == 0 {
-		log.Printf("DEBUG [%s]: No contacts found even with external search", comp.Name)
+		e.logger.Debug("No contacts found even with external search", zap.String("company", comp.Name))
 		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "NO_CONTACT_FOUND"})
 		return nil
 	}
 
-	log.Printf("Found %d candidates for %s", len(people.Contacts), comp.Name)
+	e.logger.Info("Found candidates", zap.String("company", comp.Name), zap.Int("count", len(people.Contacts)))
 
 	// Filter out hallucinated ones for enrichment and ranking to avoid wasting tokens
 	var realCandidates []IndividualContact
@@ -342,7 +377,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 	})
 	maxProfiles := 3
 	enriched := make([]IndividualContact, 0, len(people.Contacts))
-	
+
 	// We only enrich 'real' candidates
 	enrichedCount := 0
 	for i, candidate := range realCandidates {
@@ -365,12 +400,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 		})
 	}
 
-	// Add the hallucinated ones to 'enriched' list so they get saved too
-	for _, c := range people.Contacts {
-		if c.Confidence == "hallucinated" {
-			enriched = append(enriched, c)
-		}
-	}
+	// Do NOT save hallucinated contacts — they pollute the database
 
 	// 6. Rank to find best contact (only from enriched real candidates)
 	e.reporter.Update(pipeline.ProgressUpdate{
@@ -392,9 +422,9 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 	}
 
 	if best == nil {
-		log.Printf("No suitable contact found after ranking for %s", comp.Name)
+		e.logger.Warn("No suitable contact found after ranking", zap.String("company", comp.Name))
 	} else {
-		log.Printf("Best contact for %s: %s (%s)", comp.Name, best.Name, best.Role)
+		e.logger.Info("Best contact identified", zap.String("company", comp.Name), zap.String("contact", best.Name), zap.String("role", best.Role))
 	}
 
 	// 7. Save ALL contacts, mark best as primary
@@ -407,7 +437,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 	var primaryContactID uint
 	for _, candidate := range enriched {
 		isPrimary := best != nil && candidate.Name == best.Name
-		
+
 		conf := candidate.Confidence
 		if conf == "" {
 			conf = "probable"
@@ -422,9 +452,9 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 			Source:      "linkedin",
 			Confidence:  conf,
 		}, isPrimary)
-		
+
 		if err != nil {
-			log.Printf("ERROR [%s]: Failed to save contact %s: %v", comp.Name, candidate.Name, err)
+			e.logger.Error("Failed to save contact", zap.String("company", comp.Name), zap.String("contact", candidate.Name), zap.Error(err))
 		} else if isPrimary {
 			primaryContactID = contactID
 		}
@@ -455,23 +485,52 @@ func firstNonEmpty(vals ...string) string {
 	return ""
 }
 
-// TODO: Improve hallucination detection logic to be more robust than hardcoded names.
 func isHallucinated(c IndividualContact) bool {
 	hallucinatedFullNames := []string{
-		"john doe", "jane smith",
+		"john doe", "jane smith", "jane doe", "john smith",
+		"mike smith", "test user", "unknown", "n/a",
 	}
-	name := strings.ToLower(c.Name)
-	li := strings.ToLower(c.LinkedinURL)
-	
+	name := strings.ToLower(strings.TrimSpace(c.Name))
+	li := strings.ToLower(strings.TrimSpace(c.LinkedinURL))
+
 	for _, h := range hallucinatedFullNames {
 		if name == h {
 			return true
 		}
 	}
 
-	// Only flag as hallucinated if it really looks like a placeholder
-	if li == "" || li == "n/a" || li == "none" {
+	if li == "" || li == "n/a" || li == "none" || li == "null" {
 		return true
+	}
+
+	if !strings.Contains(li, "linkedin.com/in/") {
+		return true
+	}
+
+	if strings.Contains(li, "/company/") {
+		return true
+	}
+
+	parts := strings.Fields(name)
+	if len(parts) < 2 {
+		return true
+	}
+
+	for _, part := range parts {
+		if len(part) < 2 {
+			return true
+		}
+		if part == "x" || part == "xx" || part == "xxx" {
+			return true
+		}
+	}
+
+	if strings.Contains(name, "contact") || strings.Contains(name, "rh ") ||
+		strings.Contains(name, "directeur") || strings.Contains(name, "manager") ||
+		strings.Contains(name, "cto") || strings.Contains(name, "responsable") {
+		if len(parts) < 2 || strings.EqualFold(parts[0], "le") || strings.EqualFold(parts[0], "la") {
+			return true
+		}
 	}
 
 	return false

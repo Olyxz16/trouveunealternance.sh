@@ -9,11 +9,12 @@ import (
 	"jobhunter/internal/llm"
 	"jobhunter/internal/pipeline"
 	"jobhunter/internal/scraper"
-	"log"
 	"net/url"
 	"regexp"
 	"strings"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 var (
@@ -27,6 +28,7 @@ type URLDiscoverer struct {
 	geminiAPI  *llm.GeminiAPIProvider // nil if not configured — falls back to DDG
 	classifier *Classifier
 	reporter   pipeline.Reporter
+	logger     *zap.Logger
 }
 
 func NewURLDiscoverer(fetcher *scraper.CascadeFetcher, geminiAPI *llm.GeminiAPIProvider, classifier *Classifier) *URLDiscoverer {
@@ -35,6 +37,13 @@ func NewURLDiscoverer(fetcher *scraper.CascadeFetcher, geminiAPI *llm.GeminiAPIP
 		geminiAPI:  geminiAPI,
 		classifier: classifier,
 		reporter:   pipeline.NilReporter{},
+		logger:     zap.NewNop(),
+	}
+}
+
+func (d *URLDiscoverer) SetLogger(l *zap.Logger) {
+	if l != nil {
+		d.logger = l
 	}
 }
 
@@ -69,16 +78,20 @@ func (d *URLDiscoverer) DiscoverURLs(ctx context.Context, comp db.Company) (stri
 	if d.geminiAPI != nil {
 		website, linkedin, err := d.discoverWithGemini(ctx, comp)
 		if err == nil && (website != "" || linkedin != "") {
-			log.Printf("DEBUG [%s]: Gemini discovery success: website=%s, linkedin=%s", comp.Name, website, linkedin)
+			d.logger.Debug("Gemini discovery success",
+				zap.String("company", comp.Name),
+				zap.String("website", website),
+				zap.String("linkedin", linkedin))
 			return website, linkedin, nil
 		}
-		
+
 		msg := "Gemini search grounding failed"
 		if err != nil {
 			msg = fmt.Sprintf("Gemini search grounding failed: %v", err)
 		}
+		d.logger.Warn("Gemini discovery failed, falling back to DDG", zap.String("company", comp.Name), zap.Error(err))
 		d.reporter.Log(pipeline.LogMsg{Level: "WARN", Text: fmt.Sprintf("[%s] %s. Falling back to DuckDuckGo...", comp.Name, msg)})
-		
+
 		d.reporter.Update(pipeline.ProgressUpdate{
 			ID:     int(comp.ID),
 			Name:   comp.Name,
@@ -87,7 +100,10 @@ func (d *URLDiscoverer) DiscoverURLs(ctx context.Context, comp db.Company) (stri
 		})
 	}
 	w, l, err := d.discoverWithDDG(ctx, comp)
-	log.Printf("DEBUG [%s]: DDG discovery result: website=%s, linkedin=%s", comp.Name, w, l)
+	d.logger.Debug("DDG discovery result",
+		zap.String("company", comp.Name),
+		zap.String("website", w),
+		zap.String("linkedin", l))
 	return w, l, err
 }
 
@@ -96,7 +112,10 @@ func (d *URLDiscoverer) discoverWithGemini(ctx context.Context, comp db.Company)
 	backoff := 5 * time.Second
 	for attempt := 0; attempt < 3; attempt++ {
 		if attempt > 0 {
-			log.Printf("DEBUG [%s]: Retrying Gemini discovery (attempt %d/3) in %v...", comp.Name, attempt+1, backoff)
+			d.logger.Debug("Retrying Gemini discovery",
+				zap.String("company", comp.Name),
+				zap.Int("attempt", attempt+1),
+				zap.Duration("backoff", backoff))
 			select {
 			case <-ctx.Done():
 				return "", "", ctx.Err()
@@ -109,7 +128,7 @@ func (d *URLDiscoverer) discoverWithGemini(ctx context.Context, comp db.Company)
 		if err == nil && (website != "" || linkedin != "") {
 			return website, linkedin, nil
 		}
-		
+
 		if err != nil {
 			lastErr = err
 			// Check if it's a rate limit error or model error that warrants a retry
@@ -128,7 +147,7 @@ func (d *URLDiscoverer) discoverWithGemini(ctx context.Context, comp db.Company)
 			// For other errors (e.g. 404, 400), don't retry
 			return "", "", err
 		}
-		
+
 		// If err == nil but no results, we stop (don't retry a successful empty response)
 		return "", "", nil
 	}
@@ -235,16 +254,16 @@ func guessLinkedInSlug(name string) string {
 }
 
 func (d *URLDiscoverer) SearchPeopleOnLinkedIn(ctx context.Context, comp db.Company, titles []string) ([]IndividualContact, error) {
-	log.Printf("DEBUG [%s]: Searching for people on LinkedIn...", comp.Name)
-	
+	d.logger.Debug("Searching for people on LinkedIn", zap.String("company", comp.Name))
+
 	// 1. Try Gemini Search Grounding first if available
 	if d.geminiAPI != nil {
 		people, err := d.discoverPeopleWithGemini(ctx, comp, titles)
 		if err == nil && len(people) > 0 {
-			log.Printf("DEBUG [%s]: Gemini people discovery success: found %d contacts", comp.Name, len(people))
+			d.logger.Debug("Gemini people discovery success", zap.String("company", comp.Name), zap.Int("count", len(people)))
 			return people, nil
 		}
-		log.Printf("DEBUG [%s]: Gemini people discovery failed or empty (err: %v).", comp.Name, err)
+		d.logger.Debug("Gemini people discovery failed or empty", zap.String("company", comp.Name), zap.Error(err))
 	}
 
 	// 2. Fallback to multiple DDG searches with different queries
@@ -257,7 +276,7 @@ func (d *URLDiscoverer) SearchPeopleOnLinkedIn(ctx context.Context, comp db.Comp
 	seenURLs := make(map[string]bool)
 
 	for i, query := range queries {
-		log.Printf("DEBUG [%s]: DDG query %d: %s", comp.Name, i+1, query)
+		d.logger.Debug("DDG people search query", zap.String("company", comp.Name), zap.Int("query_idx", i+1), zap.String("query", query))
 		searchURL := fmt.Sprintf("https://duckduckgo.com/html/?q=%s", url.QueryEscape(query))
 
 		// Use a dedicated timeout for each search attempt
@@ -266,7 +285,7 @@ func (d *URLDiscoverer) SearchPeopleOnLinkedIn(ctx context.Context, comp db.Comp
 		cancel()
 
 		if err != nil {
-			log.Printf("DEBUG [%s]: DDG query %d failed: %v", comp.Name, i+1, err)
+			d.logger.Debug("DDG people search failed", zap.String("company", comp.Name), zap.Int("query_idx", i+1), zap.Error(err))
 			continue
 		}
 
@@ -279,7 +298,7 @@ func (d *URLDiscoverer) SearchPeopleOnLinkedIn(ctx context.Context, comp db.Comp
 				}
 			}
 		}
-		
+
 		if len(allContacts) >= 3 {
 			break // found enough
 		}
@@ -297,8 +316,10 @@ func (d *URLDiscoverer) discoverPeopleWithGemini(ctx context.Context, comp db.Co
 	prompt := fmt.Sprintf(
 		"I need to find recruitment contacts, technical managers, or founders at the company '%s' near '%s', France.\n\n"+
 			"Search for real people and return their details. \n"+
-			"Include their full name, job title, and absolute LinkedIn profile URL (https://www.linkedin.com/in/...).\n"+
+			"Include their full name, job title, and absolute LinkedIn profile URL (https://www.linkedin.com/in/...)."+
 			"If you find a personal work email, include it as well.\n\n"+
+			"CRITICAL: DO NOT invent or halluc names. Only return people you can actually find through search. "+
+			"If you cannot find real people, return an empty contacts list.\n\n"+
 			"Return ONLY a JSON object: \n"+
 			"{\"contacts\": [{\"name\": \"...\", \"role\": \"...\", \"linkedin_url\": \"...\", \"email\": \"...\"}]}",
 		comp.Name,
@@ -316,12 +337,12 @@ func (d *URLDiscoverer) discoverPeopleWithGemini(ctx context.Context, comp db.Co
 		return nil, err
 	}
 
-	log.Printf("DEBUG [%s]: Gemini People Discovery raw response: %s", comp.Name, resp.Content)
+	d.logger.Debug("Gemini People Discovery raw response", zap.String("company", comp.Name), zap.String("content", resp.Content))
 
 	clean := extractJSONFromText(resp.Content)
 	if clean == "" {
-		log.Printf("DEBUG [%s]: No JSON found in gemini response. Raw: %s", comp.Name, resp.Content)
-		
+		d.logger.Debug("No JSON found in gemini response", zap.String("company", comp.Name), zap.String("raw_content", resp.Content))
+
 		// Attempt fallback conversion
 		fixPrompt := fmt.Sprintf("Extract the people information from the following text into a JSON object with a 'contacts' field. Each contact MUST have name, role, and linkedin_url. If a linkedin_url is missing for a person, DO NOT include that person. \n\nText:\n%s", resp.Content)
 		var fixResult struct {
@@ -331,7 +352,7 @@ func (d *URLDiscoverer) discoverPeopleWithGemini(ctx context.Context, comp db.Co
 			System: "Output ONLY JSON.",
 			User:   fixPrompt,
 		}, "fix_people_json", "discovery_fix", &fixResult)
-		
+
 		if err == nil {
 			return fixResult.Contacts, nil
 		}

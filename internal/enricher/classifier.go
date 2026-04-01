@@ -99,11 +99,13 @@ Company Context:
 - City: %s
 
 STRICT RULES:
-- ONLY extract people who explicitly work for the company and ideally are in the target city/region.
+- ONLY extract people who explicitly appear in the search results provided below.
+- DO NOT invent, guess, or hallucinate names. If a name is not literally present in the search results, do NOT include it.
 - SKIP people from other companies even if they appear in search results (e.g. if you see famous CTOs from Palantir or Google, and they don't work for the target company, IGNORE them).
 - linkedin_url MUST be a full, absolute personal LinkedIn profile URL (https://www.linkedin.com/in/...).
 - name and role are required.
 - Focus on: CTO, Engineering Manager, HR, Recruitment, CEO, Founder, Tech Lead.
+- If no real people are found in the search results, return an empty contacts list.
 
 Return a JSON object with a single field "contacts" containing the list.`
 
@@ -161,11 +163,11 @@ Size: %s employees%s`,
 
 	// Update DB with score and reasoning
 	err = c.db.UpdateCompany(comp.ID, map[string]interface{}{
-		"relevance_score":         score.RelevanceScore,
-		"company_type":            score.CompanyType,
-		"has_internal_tech_team":  score.HasInternalTechTeam,
-		"tech_team_signals":       strings.Join(score.TechTeamSignals, ", "),
-		"notes":                   fmt.Sprintf("%s | %s", comp.Notes, score.Reasoning),
+		"relevance_score":        score.RelevanceScore,
+		"company_type":           score.CompanyType,
+		"has_internal_tech_team": score.HasInternalTechTeam,
+		"tech_team_signals":      strings.Join(score.TechTeamSignals, ", "),
+		"notes":                  fmt.Sprintf("%s | %s", comp.Notes, score.Reasoning),
 	})
 
 	return score, err
