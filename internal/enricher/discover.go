@@ -310,7 +310,14 @@ func guessLinkedInSlug(name string) string {
 func (d *URLDiscoverer) SearchPeopleOnLinkedIn(ctx context.Context, comp db.Company, titles []string) ([]IndividualContact, error) {
 	d.logger.Debug("Searching for people on LinkedIn", zap.String("company", comp.Name))
 
-	// 1. Try Gemini Search Grounding first if available
+	// 1. Try LLM direct knowledge first
+	people, err := d.discoverPeopleWithLLM(ctx, comp, titles)
+	if err == nil && len(people) > 0 {
+		d.logger.Debug("LLM people discovery success", zap.String("company", comp.Name), zap.Int("count", len(people)))
+		return people, nil
+	}
+
+	// 2. Try Gemini Search Grounding if available
 	if d.geminiAPI != nil {
 		people, err := d.discoverPeopleWithGemini(ctx, comp, titles)
 		if err == nil && len(people) > 0 {
@@ -320,7 +327,7 @@ func (d *URLDiscoverer) SearchPeopleOnLinkedIn(ctx context.Context, comp db.Comp
 		d.logger.Debug("Gemini people discovery failed or empty", zap.String("company", comp.Name), zap.Error(err))
 	}
 
-	// 2. Fallback to multiple DDG searches with different queries
+	// 3. Fallback to multiple DDG searches with different queries
 	queries := []string{
 		fmt.Sprintf("site:linkedin.com/in/ %s Poitiers (%s)", comp.Name, strings.Join(titles, " OR ")),
 		fmt.Sprintf("site:linkedin.com/in/ %s (%s)", comp.Name, strings.Join(titles, " OR ")),
@@ -359,6 +366,37 @@ func (d *URLDiscoverer) SearchPeopleOnLinkedIn(ctx context.Context, comp db.Comp
 	}
 
 	return allContacts, nil
+}
+
+func (d *URLDiscoverer) discoverPeopleWithLLM(ctx context.Context, comp db.Company, titles []string) ([]IndividualContact, error) {
+	prompt := fmt.Sprintf(
+		"Find real, publicly known contacts at '%s' in '%s', France.\n\n"+
+			"Target roles: %s\n\n"+
+			"Return their full name, job title, and LinkedIn profile URL (https://www.linkedin.com/in/...)."+
+			"If you find a personal work email, include it as well.\n\n"+
+			"CRITICAL: DO NOT invent names. Only return people who actually exist and work at this company. "+
+			"If you don't know any real people, return an empty contacts list.\n\n"+
+			"Return ONLY a JSON object: \n"+
+			"{\"contacts\": [{\"name\": \"...\", \"role\": \"...\", \"linkedin_url\": \"...\", \"email\": \"...\"}]}",
+		comp.Name,
+		comp.City,
+		strings.Join(titles, ", "),
+	)
+
+	var result struct {
+		Contacts []IndividualContact `json:"contacts"`
+	}
+	req := llm.CompletionRequest{
+		System: "You are a helpful recruitment research assistant. You provide data in JSON format.",
+		User:   prompt,
+	}
+
+	err := d.classifier.llm.CompleteJSON(ctx, req, "people_discovery_llm", "", &result)
+	if err != nil {
+		return nil, err
+	}
+
+	return result.Contacts, nil
 }
 
 func (d *URLDiscoverer) discoverPeopleWithGemini(ctx context.Context, comp db.Company, titles []string) ([]IndividualContact, error) {
