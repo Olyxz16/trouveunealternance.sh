@@ -100,9 +100,10 @@ Company Context:
 - City: %s
 
 STRICT RULES:
-- ONLY extract people who explicitly appear in the search results provided below.
+- ONLY extract people who explicitly work for THIS company (%s).
 - DO NOT invent, guess, or hallucinate names. If a name is not literally present in the search results, do NOT include it.
 - SKIP people from other companies even if they appear in search results (e.g. if you see famous CTOs from Palantir or Google, and they don't work for the target company, IGNORE them).
+- VERIFY company affiliation: if a person's LinkedIn snippet or search result doesn't clearly mention they work for %s, SKIP them.
 - linkedin_url MUST be a full, absolute personal LinkedIn profile URL (https://www.linkedin.com/in/...).
 - name and role are required.
 - Focus on: CTO, Engineering Manager, HR, Recruitment, CEO, Founder, Tech Lead.
@@ -113,7 +114,7 @@ Return a JSON object with a single field "contacts" containing the list.`
 func (c *Classifier) ExtractPeopleFromSearchResults(ctx context.Context, markdown string, comp db.Company, runID string) (PeoplePageData, error) {
 	var result PeoplePageData
 	req := llm.CompletionRequest{
-		System: fmt.Sprintf(PeopleSearchExtractionPrompt, comp.Name, comp.City),
+		System: fmt.Sprintf(PeopleSearchExtractionPrompt, comp.Name, comp.City, comp.Name, comp.Name),
 		User:   fmt.Sprintf("Search results (Markdown):\n\n%s", markdown),
 	}
 	err := c.llm.CompleteJSON(ctx, req, "extract_people_from_search", runID, &result)

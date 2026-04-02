@@ -448,7 +448,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 	})
 	var primaryContactID uint
 	for _, candidate := range enriched {
-		isPrimary := best != nil && candidate.Name == best.Name
+		isPrimary := best != nil && strings.EqualFold(strings.TrimSpace(candidate.Name), strings.TrimSpace(best.Name))
 
 		conf := candidate.Confidence
 		if conf == "" {
@@ -469,6 +469,16 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 			e.logger.Error("Failed to save contact", zap.String("company", comp.Name), zap.String("contact", candidate.Name), zap.Error(err))
 		} else if isPrimary {
 			primaryContactID = contactID
+		}
+	}
+
+	if best != nil && primaryContactID == 0 {
+		e.logger.Warn("Primary contact name mismatch during save",
+			zap.String("company", comp.Name),
+			zap.String("best_name", best.Name),
+			zap.Int("enriched_count", len(enriched)))
+		for _, c := range enriched {
+			e.logger.Debug("  candidate", zap.String("name", c.Name))
 		}
 	}
 
