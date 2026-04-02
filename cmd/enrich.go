@@ -197,7 +197,7 @@ var enrichCmd = &cobra.Command{
 			forceDomains := strings.Split(cfg.ForceBrowserDomains, ",")
 			extractor := scraper.NewExtractor()
 			cascade := scraper.NewCascadeFetcher(httpFetcher, browserFetcher, forceDomains, database, extractor, runLogger, cfg)
-			enr := enricher.NewEnricher(database, cfg, cascade, classifier, geminiAPI, runLogger)
+			enr := enricher.NewEnricher(database, cfg, cascade, classifier, geminiAPI, runLogger, loadUserLinkedInURL())
 			enr.SetReporter(reporter)
 
 			if !noTUI {

@@ -56,6 +56,7 @@ var evalCmd = &cobra.Command{
 		}
 
 		userName := loadUserName()
+		userLinkedInURL := loadUserLinkedInURL()
 		commitHash := getCommitHash()
 
 		var evaluations []eval.CompanyEvaluation
@@ -71,7 +72,7 @@ var evalCmd = &cobra.Command{
 			}
 
 			cScore := eval.ScoreCompany(&comp)
-			ctScore, penalties := eval.ScoreContacts(&comp, contacts, userName)
+			ctScore, penalties := eval.ScoreContacts(&comp, contacts, userName, userLinkedInURL)
 
 			companyScores = append(companyScores, cScore)
 			contactScores = append(contactScores, ctScore)
@@ -185,6 +186,20 @@ func loadUserName() string {
 		return ""
 	}
 	return profile.Name
+}
+
+func loadUserLinkedInURL() string {
+	data, err := os.ReadFile("profile.json")
+	if err != nil {
+		return ""
+	}
+	var profile struct {
+		LinkedInURL string `json:"linkedin_url"`
+	}
+	if err := json.Unmarshal(data, &profile); err != nil {
+		return ""
+	}
+	return profile.LinkedInURL
 }
 
 func getCommitHash() string {

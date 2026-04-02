@@ -180,7 +180,7 @@ func urlResolves(raw string) bool {
 	return resp.StatusCode < 400
 }
 
-func ScoreContacts(comp *db.Company, contacts []db.Contact, userName string) (ContactScore, []Penalty) {
+func ScoreContacts(comp *db.Company, contacts []db.Contact, userName string, userLinkedInURL string) (ContactScore, []Penalty) {
 	score := ContactScore{
 		Breakdown: ContactBreakdown{},
 	}
@@ -268,7 +268,7 @@ func ScoreContacts(comp *db.Company, contacts []db.Contact, userName string) (Co
 			})
 		}
 
-		if isUserAsContact(c, userName) {
+		if isUserAsContact(c, userName, userLinkedInURL) {
 			penalties = append(penalties, Penalty{
 				Type:        "user_as_contact",
 				ContactName: c.Name,
@@ -389,7 +389,7 @@ func isPlaceholderName(name string) bool {
 	return false
 }
 
-func isUserAsContact(c *db.Contact, userName string) bool {
+func isUserAsContact(c *db.Contact, userName string, userLinkedInURL string) bool {
 	if userName == "" || userName == "Your Name" {
 		return false
 	}
@@ -403,7 +403,21 @@ func isUserAsContact(c *db.Contact, userName string) bool {
 			return true
 		}
 	}
+
+	if userLinkedInURL != "" && c.LinkedinURL != "" {
+		return normalizeLinkedIn(c.LinkedinURL) == normalizeLinkedIn(userLinkedInURL)
+	}
+
 	return false
+}
+
+func normalizeLinkedIn(raw string) string {
+	u := strings.ToLower(strings.TrimSpace(raw))
+	u = strings.TrimRight(u, "/")
+	if idx := strings.Index(u, "?"); idx >= 0 {
+		u = u[:idx]
+	}
+	return u
 }
 
 func ComputeAggregate(companyScores []CompanyScore, contactScores []ContactScore, allPenalties [][]Penalty, totalContacts int) AggregateMetrics {

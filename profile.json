@@ -1,7 +1,8 @@
 {
-  "name": "Your Name",
-  "school": "Your School",
-  "skills": ["Python", "Docker", "Linux", "CI/CD", "Go"],
+  "name": "Cédric Sazos",
+  "school": "Université de Poitiers",
+  "linkedin_url": "https://www.linkedin.com/in/cedric-sazos/",
+  "skills": ["Docker", "Linux", "CI/CD", "Go"],
   "projects": [
     {
       "name": "Project 1",
@@ -9,7 +10,7 @@
       "stack": ["Go", "SQLite"]
     }
   ],
-  "availability": "September 2025",
+  "availability": "September 2026",
   "duration": "6 months",
   "interests": ["Infrastructure", "Backend", "Distributed Systems"]
 }

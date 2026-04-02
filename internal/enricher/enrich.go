@@ -15,14 +15,15 @@ import (
 )
 
 type Enricher struct {
-	db         *db.DB
-	cfg        *config.Config
-	fetcher    *scraper.CascadeFetcher
-	classifier *Classifier
-	recherche  *collector.RechercheClient
-	geminiAPI  *llm.GeminiAPIProvider // nil if not configured
-	reporter   pipeline.Reporter
-	logger     *zap.Logger
+	db              *db.DB
+	cfg             *config.Config
+	fetcher         *scraper.CascadeFetcher
+	classifier      *Classifier
+	recherche       *collector.RechercheClient
+	geminiAPI       *llm.GeminiAPIProvider // nil if not configured
+	reporter        pipeline.Reporter
+	logger          *zap.Logger
+	userLinkedInURL string
 }
 
 func NewEnricher(
@@ -32,19 +33,21 @@ func NewEnricher(
 	classifier *Classifier,
 	geminiAPI *llm.GeminiAPIProvider,
 	logger *zap.Logger,
+	userLinkedInURL string,
 ) *Enricher {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
 	return &Enricher{
-		db:         database,
-		cfg:        cfg,
-		fetcher:    fetcher,
-		classifier: classifier,
-		recherche:  collector.NewRechercheClient(),
-		geminiAPI:  geminiAPI,
-		reporter:   pipeline.NilReporter{},
-		logger:     logger,
+		db:              database,
+		cfg:             cfg,
+		fetcher:         fetcher,
+		classifier:      classifier,
+		recherche:       collector.NewRechercheClient(),
+		geminiAPI:       geminiAPI,
+		reporter:        pipeline.NilReporter{},
+		logger:          logger,
+		userLinkedInURL: normalizeLinkedIn(userLinkedInURL),
 	}
 }
 
@@ -326,15 +329,30 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 		}
 	}
 
-	// If NO real contacts found on page, try external search (Gemini Search Grounding)
-	if len(people.Contacts) == 0 {
+	e.logger.Info("Found candidates", zap.String("company", comp.Name), zap.Int("count", len(people.Contacts)))
+
+	// Filter out hallucinated and self-contacts for enrichment and ranking
+	var realCandidates []IndividualContact
+	for _, c := range people.Contacts {
+		if c.Confidence == "hallucinated" {
+			continue
+		}
+		if e.isSelf(c) {
+			e.logger.Warn("Filtered out self-contact", zap.String("company", comp.Name), zap.String("name", c.Name), zap.String("linkedin", c.LinkedinURL))
+			continue
+		}
+		realCandidates = append(realCandidates, c)
+	}
+
+	// If filtering removed all contacts, try external search
+	if len(realCandidates) == 0 {
 		e.reporter.Update(pipeline.ProgressUpdate{
 			ID:     int(comp.ID),
 			Name:   comp.Name,
 			Step:   "External Search",
 			Status: pipeline.StatusRunning,
 		})
-		e.logger.Debug("No contacts found on page, trying external search", zap.String("company", comp.Name))
+		e.logger.Debug("No contacts after filtering, trying external search", zap.String("company", comp.Name))
 		disc := NewURLDiscoverer(e.fetcher, e.geminiAPI, e.classifier)
 		disc.SetLogger(e.logger)
 		disc.SetReporter(e.reporter)
@@ -346,25 +364,19 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 				} else {
 					extContacts[i].Confidence = "probable"
 				}
+				if e.isSelf(extContacts[i]) {
+					e.logger.Warn("Filtered out self-contact from external search", zap.String("company", comp.Name), zap.String("name", extContacts[i].Name))
+					continue
+				}
+				realCandidates = append(realCandidates, extContacts[i])
 			}
-			people.Contacts = append(people.Contacts, extContacts...)
 		}
 	}
 
-	if len(people.Contacts) == 0 {
+	if len(realCandidates) == 0 {
 		e.logger.Debug("No contacts found even with external search", zap.String("company", comp.Name))
 		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "NO_CONTACT_FOUND"})
 		return nil
-	}
-
-	e.logger.Info("Found candidates", zap.String("company", comp.Name), zap.Int("count", len(people.Contacts)))
-
-	// Filter out hallucinated ones for enrichment and ranking to avoid wasting tokens
-	var realCandidates []IndividualContact
-	for _, c := range people.Contacts {
-		if c.Confidence != "hallucinated" {
-			realCandidates = append(realCandidates, c)
-		}
 	}
 
 	// 5. Enrich top candidates from their individual /in/ profiles (max 3)
@@ -499,11 +511,7 @@ func isHallucinated(c IndividualContact) bool {
 		}
 	}
 
-	if li == "" || li == "n/a" || li == "none" || li == "null" {
-		return true
-	}
-
-	if !strings.Contains(li, "linkedin.com/in/") {
+	if li == "n/a" || li == "none" || li == "null" {
 		return true
 	}
 
@@ -534,4 +542,20 @@ func isHallucinated(c IndividualContact) bool {
 	}
 
 	return false
+}
+
+func (e *Enricher) isSelf(c IndividualContact) bool {
+	if e.userLinkedInURL == "" {
+		return false
+	}
+	return normalizeLinkedIn(c.LinkedinURL) == e.userLinkedInURL
+}
+
+func normalizeLinkedIn(raw string) string {
+	u := strings.ToLower(strings.TrimSpace(raw))
+	u = strings.TrimRight(u, "/")
+	if idx := strings.Index(u, "?"); idx >= 0 {
+		u = u[:idx]
+	}
+	return u
 }
