@@ -17,7 +17,8 @@ import (
 type Client struct {
 	provider        Provider
 	fallback        Provider
-	limiter         *rate.Limiter
+	limiter         *rate.Limiter       // Legacy: kept for backward compatibility
+	rateLimiter     *UnifiedRateLimiter // New unified rate limiter
 	db              *db.DB
 	logger          *zap.Logger
 	brokenProviders map[string]bool
@@ -25,13 +26,28 @@ type Client struct {
 }
 
 func NewClient(provider Provider, fallback Provider, rpm int, database *db.DB, logger *zap.Logger) *Client {
+	return NewClientWithSharedLimiter(provider, fallback, rpm, database, logger, nil)
+}
+
+func NewClientWithSharedLimiter(provider Provider, fallback Provider, rpm int, database *db.DB, logger *zap.Logger, sharedLimiter *rate.Limiter) *Client {
 	if logger == nil {
 		logger = zap.NewNop()
 	}
+
+	// Create or use shared rate limiter (for backward compatibility)
+	limiter := sharedLimiter
+	if limiter == nil {
+		limiter = rate.NewLimiter(rate.Every(time.Minute/time.Duration(rpm)), 1)
+	}
+
+	// Create unified rate limiter with tracking (no daily limit for now, set to 0)
+	rateLimiter := NewUnifiedRateLimiter(rpm, 0, logger)
+
 	return &Client{
 		provider:        provider,
 		fallback:        fallback,
-		limiter:         rate.NewLimiter(rate.Every(time.Minute/time.Duration(rpm)), 1),
+		limiter:         limiter,
+		rateLimiter:     rateLimiter,
 		db:              database,
 		logger:          logger,
 		brokenProviders: make(map[string]bool),
@@ -53,11 +69,21 @@ func (c *Client) markBroken(name string) {
 	}
 }
 
+// GetRateLimiterStats returns current rate limiter statistics
+func (c *Client) GetRateLimiterStats() map[string]ProviderStats {
+	return c.rateLimiter.GetStats()
+}
+
+// GetRateLimiterSummary returns a formatted summary of rate limiter stats
+func (c *Client) GetRateLimiterSummary() string {
+	return c.rateLimiter.GetSummary()
+}
+
 var freeFallbackModels = []string{
-	"google/gemini-2.0-flash-lite:free",
-	"mistralai/mistral-7b-instruct:free",
+	"google/gemini-2.0-flash-exp:free",
+	"meta-llama/llama-3.2-3b-instruct:free",
+	"mistralai/mistral-7b-instruct-v0.3:free",
 	"google/gemma-2-9b-it:free",
-	"openchat/openchat-7b:free",
 }
 
 func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runID string) (CompletionResponse, error) {
@@ -68,28 +94,36 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runI
 	// 1. Try Primary
 	if !c.isBroken(c.provider.Name()) {
 		for i := 0; i <= maxRetries; i++ {
-			if err := c.limiter.Wait(ctx); err != nil {
+			// Wait for rate limit and record request
+			if err := c.rateLimiter.Wait(ctx); err != nil {
 				return CompletionResponse{}, err
 			}
+			c.rateLimiter.RecordRequest(c.provider.ProviderName())
 
 			attemptCtx, cancel := context.WithTimeout(ctx, 300*time.Second)
 			resp, err := c.provider.Complete(attemptCtx, req)
 			cancel()
 
 			if err == nil {
+				c.rateLimiter.RecordSuccess(c.provider.ProviderName(), resp.PromptTokens+resp.CompletionTokens)
 				c.logUsage(resp, task, runID)
 				return resp, nil
 			}
 			lastErr = err
+			c.rateLimiter.RecordFailure(c.provider.ProviderName())
 
 			shouldRetry := false
 			isFatal := false
 
 			if _, ok := err.(*errors.RateLimitError); ok {
+				c.rateLimiter.RecordRateLimitHit(c.provider.ProviderName())
 				shouldRetry = true
 				backoff = 10 * time.Second // Aggressive cooldown for rate limits
 			} else if modelErr, ok := err.(*errors.ModelError); ok {
 				if modelErr.StatusCode >= 500 || modelErr.StatusCode == 429 {
+					if modelErr.StatusCode == 429 {
+						c.rateLimiter.RecordRateLimitHit(c.provider.ProviderName())
+					}
 					shouldRetry = true
 				}
 				if modelErr.StatusCode == 402 || modelErr.StatusCode == 400 || modelErr.StatusCode == 404 {
@@ -121,17 +155,28 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runI
 	// 2. Try configured Fallback
 	if c.fallback != nil && !c.isBroken(c.fallback.Name()) {
 		c.logger.Info("Attempting configured fallback", zap.String("fallback", c.fallback.Name()))
-		
+
+		// Wait for rate limit and record request
+		if err := c.rateLimiter.Wait(ctx); err != nil {
+			return CompletionResponse{}, err
+		}
+		c.rateLimiter.RecordRequest(c.fallback.ProviderName())
+
 		attemptCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 		resp, err := c.fallback.Complete(attemptCtx, req)
 		cancel()
 
 		if err == nil {
+			c.rateLimiter.RecordSuccess(c.fallback.ProviderName(), resp.PromptTokens+resp.CompletionTokens)
 			c.logUsage(resp, task, runID)
 			return resp, nil
 		}
-		
+
+		c.rateLimiter.RecordFailure(c.fallback.ProviderName())
 		if modelErr, ok := err.(*errors.ModelError); ok {
+			if modelErr.StatusCode == 429 {
+				c.rateLimiter.RecordRateLimitHit(c.fallback.ProviderName())
+			}
 			if modelErr.StatusCode == 402 || modelErr.StatusCode == 400 || modelErr.StatusCode == 404 {
 				c.markBroken(c.fallback.Name())
 			}
@@ -142,7 +187,7 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runI
 	// 3. Try "Emergency" Free Fallback Chain
 	if orProvider, ok := c.provider.(*OpenRouterProvider); ok {
 		c.logger.Info("All primary/fallback options exhausted. Cycling emergency free models...")
-		
+
 		originalModel := orProvider.Model
 		defer func() { orProvider.Model = originalModel }()
 
@@ -150,8 +195,15 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runI
 			if model == originalModel || c.isBroken(model) {
 				continue
 			}
-			
+
 			c.logger.Debug("Emergency fallback trial", zap.String("model", model))
+
+			// Wait for rate limit and record request
+			if err := c.rateLimiter.Wait(ctx); err != nil {
+				return CompletionResponse{}, err
+			}
+			c.rateLimiter.RecordRequest("openrouter_emergency")
+
 			orProvider.Model = model
 			attemptCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 			resp, err := orProvider.Complete(attemptCtx, req)
@@ -159,12 +211,19 @@ func (c *Client) Complete(ctx context.Context, req CompletionRequest, task, runI
 
 			if err == nil {
 				c.logger.Info("Emergency model succeeded!", zap.String("model", model))
+				c.rateLimiter.RecordSuccess("openrouter_emergency", resp.PromptTokens+resp.CompletionTokens)
 				c.logUsage(resp, task, runID)
 				return resp, nil
 			}
-			
-			if modelErr, ok := err.(*errors.ModelError); ok && (modelErr.StatusCode == 402 || modelErr.StatusCode == 400) {
-				c.markBroken(model)
+
+			c.rateLimiter.RecordFailure("openrouter_emergency")
+			if modelErr, ok := err.(*errors.ModelError); ok {
+				if modelErr.StatusCode == 429 {
+					c.rateLimiter.RecordRateLimitHit("openrouter_emergency")
+				}
+				if modelErr.StatusCode == 402 || modelErr.StatusCode == 400 {
+					c.markBroken(model)
+				}
 			}
 		}
 	}
@@ -189,7 +248,7 @@ func extractJSON(content string) string {
 
 	startCurly := strings.Index(cleanJSON, "{")
 	startSquare := strings.Index(cleanJSON, "[")
-	
+
 	start := -1
 	if startCurly != -1 && (startSquare == -1 || startCurly < startSquare) {
 		start = startCurly
@@ -199,7 +258,7 @@ func extractJSON(content string) string {
 
 	endCurly := strings.LastIndex(cleanJSON, "}")
 	endSquare := strings.LastIndex(cleanJSON, "]")
-	
+
 	end := -1
 	if endCurly != -1 && (endSquare == -1 || endCurly > endSquare) {
 		end = endCurly
@@ -239,14 +298,14 @@ func (c *Client) CompleteJSON(ctx context.Context, req CompletionRequest, task, 
 		}
 
 		c.logger.Warn("JSON unmarshal failed, retrying with error feedback", zap.Error(err))
-		
+
 		req.User = fmt.Sprintf("%s\n\nYour previous response was not valid JSON: %s\nError: %v\nPlease return ONLY the valid JSON object.", req.User, resp.Content, err)
-		
+
 		resp, err = c.Complete(ctx, req, task, runID)
 		if err != nil {
 			return err
 		}
-		
+
 		cleanJSON = extractJSON(resp.Content)
 		if err := json.Unmarshal([]byte(cleanJSON), target); err != nil {
 			return errors.NewParseError(resp.Content, fmt.Sprintf("%T", target))

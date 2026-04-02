@@ -448,7 +448,16 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 	})
 	var primaryContactID uint
 	for _, candidate := range enriched {
-		isPrimary := best != nil && strings.EqualFold(strings.TrimSpace(candidate.Name), strings.TrimSpace(best.Name))
+		isPrimary := false
+		if best != nil {
+			candidateName := strings.ToLower(strings.TrimSpace(candidate.Name))
+			bestName := strings.ToLower(strings.TrimSpace(best.Name))
+			isPrimary = candidateName == bestName
+			if !isPrimary {
+				// Fuzzy match: check if one contains the other
+				isPrimary = strings.Contains(candidateName, bestName) || strings.Contains(bestName, candidateName)
+			}
+		}
 
 		conf := candidate.Confidence
 		if conf == "" {
@@ -478,7 +487,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 			zap.String("best_name", best.Name),
 			zap.Int("enriched_count", len(enriched)))
 		for _, c := range enriched {
-			e.logger.Debug("  candidate", zap.String("name", c.Name))
+			e.logger.Warn("  candidate", zap.String("name", c.Name))
 		}
 	}
 

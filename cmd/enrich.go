@@ -32,7 +32,7 @@ func init() {
 	enrichCmd.Flags().IntVarP(&batchSize, "batch", "b", 10, "Number of companies to enrich")
 	enrichCmd.Flags().IntVarP(&companyID, "id", "i", 0, "Specific company ID to enrich")
 	enrichCmd.Flags().BoolVar(&noTUI, "no-tui", false, "Disable TUI and log to stdout")
-	enrichCmd.Flags().IntVarP(&parallel, "parallel", "p", 1, "Number of companies to enrich in parallel")
+	enrichCmd.Flags().IntVarP(&parallel, "parallel", "p", 3, "Number of companies to enrich in parallel (default from config)")
 	rootCmd.AddCommand(enrichCmd)
 }
 
@@ -87,6 +87,11 @@ var enrichCmd = &cobra.Command{
 		runID := uuid.New().String()
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
+
+		// Use config value for parallelism if flag wasn't explicitly set
+		if !cmd.Flags().Changed("parallel") {
+			parallel = cfg.Enrichment.Parallelism
+		}
 
 		// 1. Redirect logs to file
 		logFile, err := os.OpenFile("jobhunter.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
@@ -164,7 +169,7 @@ var enrichCmd = &cobra.Command{
 			}
 			reporter.Log(pipeline.LogMsg{Level: "INFO", Text: "Initializing enrichment pipeline..."})
 
-			// Setup LLM
+			// Setup LLM — shared across all workers with shared rate limiter
 			reporter.Log(pipeline.LogMsg{Level: "INFO", Text: "Connecting to LLM providers..."})
 			primary, fallback := llm.InitProviders(cfg.LLMPrimary, cfg.LLMFallback, cfg, runLogger)
 
@@ -179,7 +184,7 @@ var enrichCmd = &cobra.Command{
 				reporter.Log(pipeline.LogMsg{Level: "WARN", Text: "GEMINI_API_KEY not set — falling back to DuckDuckGo for discovery"})
 			}
 
-			// Setup Scraper
+			// Setup Scraper — shared across all workers
 			reporter.Log(pipeline.LogMsg{Level: "INFO", Text: "Launching browser instance..."})
 			httpFetcher := scraper.NewHTTPFetcher()
 			browserFetcher, err := scraper.NewBrowserFetcher(
@@ -200,8 +205,6 @@ var enrichCmd = &cobra.Command{
 			forceDomains := strings.Split(cfg.ForceBrowserDomains, ",")
 			extractor := scraper.NewExtractor()
 			cascade := scraper.NewCascadeFetcher(httpFetcher, browserFetcher, forceDomains, database, extractor, runLogger, cfg)
-			enr := enricher.NewEnricher(database, cfg, cascade, classifier, geminiAPI, runLogger, loadUserLinkedInURL())
-			enr.SetReporter(reporter)
 
 			if !noTUI {
 				p.Send(tui.ReadyMsg{})

@@ -1,0 +1,193 @@
+# JobHunter Configuration File
+# This file contains business logic, strategies, and operational parameters
+# Secrets (API keys) should be in .env file
+
+# ============================================================================
+# LLM Configuration
+# ============================================================================
+llm:
+  # Model strategies by task type
+  # Each task can use different models for cost/quality optimization
+  models:
+    discovery:
+      primary: "google/gemini-2.0-flash-exp:free"
+      fallback: "meta-llama/llama-3.2-3b-instruct:free"
+      provider: "openrouter"  # or "gemini_api"
+    
+    extraction:
+      primary: "google/gemini-2.0-flash-exp:free"
+      fallback: "meta-llama/llama-3.2-3b-instruct:free"
+      provider: "openrouter"
+    
+    ranking:
+      primary: "google/gemini-2.0-flash-exp:free"
+      fallback: "mistralai/mistral-7b-instruct-v0.3:free"
+      provider: "openrouter"
+    
+    enrichment:
+      primary: "google/gemini-2.0-flash-exp:free"
+      fallback: "meta-llama/llama-3.2-3b-instruct:free"
+      provider: "openrouter"
+  
+  # Emergency fallback chain (tried if both primary+fallback fail)
+  emergency_fallbacks:
+    - "mistralai/mistral-7b-instruct-v0.3:free"
+    - "google/gemma-2-9b-it:free"
+  
+  # Rate limiting (unified global limiter)
+  rate_limits:
+    requests_per_minute: 50
+    requests_per_day: 50000
+    burst_size: 3
+    
+    # Per-provider limits (for monitoring/alerting only)
+    provider_limits:
+      openrouter: 50
+      gemini_api: 12
+    
+    # Backoff strategy
+    respect_retry_after: true
+    max_backoff_seconds: 120
+    enable_dynamic_adjustment: false  # Experimental
+
+# ============================================================================
+# Enrichment Pipeline Configuration
+# ============================================================================
+enrichment:
+  # Parallelism
+  parallelism: 3  # Number of concurrent companies to process
+  batch_size: 10  # Default batch size for CLI
+  
+  # Processing methods (keep both for A/B testing)
+  methods:
+    batch_ranking: true
+    single_ranking: true  # Keep for comparison
+    batch_enrichment: true
+    single_enrichment: true  # Keep for comparison
+  
+  # Discovery strategy
+  discovery:
+    strategy: "gemini_then_browser"  # Options: llm_only, gemini_then_browser
+    use_gemini_search_grounding: true
+    use_browser_fallback: true
+    skip_ddg_search: true  # Skip DuckDuckGo intermediary (unreliable)
+    
+    # Only use browser fallback for high-value targets
+    browser_fallback_min_score: 7
+  
+  # Conditional enrichment (skip full enrichment for low-priority companies)
+  conditional:
+    enabled: true
+    low_score_threshold: 6
+    max_profiles_to_enrich:
+      high_priority: 3   # score >= 8
+      medium_priority: 1 # 6 <= score < 8
+      low_priority: 0    # score < 6
+
+# ============================================================================
+# Caching Configuration
+# ============================================================================
+cache:
+  llm_responses:
+    enabled: true
+    ttl_hours:
+      discovery: 24
+      extraction: 168  # 7 days
+      ranking: 12
+      enrichment: 24
+  
+  scrape:
+    enabled: true
+    # Scrape cache is already implemented in code
+
+# ============================================================================
+# Quality Thresholds
+# ============================================================================
+quality_thresholds:
+  http_min: 0.7
+  browser_min: 0.3
+  discovery_min: 0.2
+  enrich_min: 0.5
+
+# ============================================================================
+# Browser & Scraping Configuration
+# ============================================================================
+scraping:
+  user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+  
+  # Domains that require browser (not HTTP)
+  force_browser_domains:
+    - "linkedin.com"
+    - "duckduckgo.com"
+  
+  # Delays (for rate limiting and anti-bot)
+  delays:
+    browser_settle: 3s
+    cookie_click: 500ms
+    scroll_base: 2s
+    scroll_variance: 500ms
+    retry_backoff: 5s
+    batch_sleep: 1s
+
+# ============================================================================
+# SIRENE Data Configuration
+# ============================================================================
+sirene:
+  # NAF codes for tech companies
+  tech_naf_prefixes:
+    - "62"
+    - "63"
+  
+  naf_labels:
+    "6201Z": "Programmation informatique"
+    "6202A": "Conseil en systèmes et logiciels informatiques"
+    "6202B": "Tierce maintenance de systèmes et d'applications informatiques"
+    "6203Z": "Gestion d'installations informatiques"
+    "6209Z": "Autres activités informatiques"
+    "6311Z": "Traitement de données, hébergement et activités connexes"
+    "6312Z": "Portails Internet"
+  
+  headcount_levels:
+    "03": 6
+    "11": 10
+    "12": 20
+    "21": 50
+    "22": 100
+    "31": 200
+    "32": 250
+    "41": 500
+    "42": 1000
+    "51": 2000
+    "52": 5000
+    "53": 10000
+  
+  headcount_labels:
+    "NN": "0"
+    "00": "0"
+    "01": "1-2"
+    "02": "3-5"
+    "03": "6-9"
+    "11": "10-19"
+    "12": "20-49"
+    "21": "50-99"
+    "22": "100-199"
+    "31": "200-249"
+    "32": "250-499"
+    "41": "500-999"
+    "42": "1000-1999"
+    "51": "2000-4999"
+    "52": "5000-9999"
+    "53": "10000+"
+
+# ============================================================================
+# Monitoring & Alerts
+# ============================================================================
+monitoring:
+  enable_rate_limit_alerts: true
+  alert_threshold_per_hour: 10
+  log_level: "info"  # Options: debug, info, warn, error
+  
+  # TUI settings
+  tui:
+    enable_rate_monitor: true
+    refresh_interval: 1s
