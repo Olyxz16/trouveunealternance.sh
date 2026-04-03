@@ -5,6 +5,7 @@ import (
 	"errors"
 	"jobhunter/internal/config"
 	"jobhunter/internal/db"
+	"regexp"
 	"strings"
 
 	"go.uber.org/zap"
@@ -221,4 +222,24 @@ func (c *CascadeFetcher) calculateQuality(markdown string) float64 {
 	}
 
 	return 1.0
+}
+
+// personalProfileRe matches LinkedIn personal profile URLs (/in/slug)
+var personalProfileRe = regexp.MustCompile(`linkedin\.com/in/[a-zA-Z0-9\-_%]+`)
+
+// HasPersonalProfiles checks if the markdown contains personal LinkedIn profile links.
+// A valid people page MUST have /in/ URLs — if none are found, LinkedIn is likely
+// blocking the content (anti-bot, login wall, or empty company page).
+func HasPersonalProfiles(markdown string) bool {
+	return personalProfileRe.MatchString(markdown)
+}
+
+// CountPersonalProfiles returns the number of distinct personal profile URLs found.
+func CountPersonalProfiles(markdown string) int {
+	matches := personalProfileRe.FindAllString(markdown, -1)
+	seen := make(map[string]bool)
+	for _, m := range matches {
+		seen[m] = true
+	}
+	return len(seen)
 }

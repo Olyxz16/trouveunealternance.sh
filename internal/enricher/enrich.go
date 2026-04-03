@@ -252,7 +252,23 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 	peopleURL := strings.TrimSuffix(linkedin, "/") + "/people/"
 	e.logger.Debug("Fetching people from LinkedIn", zap.String("company", comp.Name), zap.String("url", peopleURL))
 	peopleRes, err := e.fetcher.ScrollAndFetch(ctx, peopleURL, 3)
+
+	// Fail-fast: check if LinkedIn is blocking the people page (no /in/ profile URLs)
 	if err == nil && peopleRes.Quality >= e.cfg.Quality.DiscoveryMin {
+		profileCount := scraper.CountPersonalProfiles(peopleRes.ContentMD)
+		if profileCount == 0 {
+			e.logger.Warn("LinkedIn anti-bot detected: people page has no personal profile URLs",
+				zap.String("company", comp.Name),
+				zap.Int("content_len", len(peopleRes.ContentMD)))
+			e.reporter.Log(pipeline.LogMsg{
+				Level: "WARN",
+				Text:  fmt.Sprintf("[%s] LinkedIn anti-bot: people page contains no personal profiles. Skipping enrichment.", comp.Name),
+			})
+			_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "ENRICHMENT_BLOCKED"})
+			return nil
+		}
+		e.logger.Debug("LinkedIn people page OK", zap.String("company", comp.Name), zap.Int("profile_count", profileCount))
+
 		p, err := e.classifier.ExtractPeopleFromPage(ctx, peopleRes.ContentMD, runID)
 		if err != nil {
 			e.logger.Error("LinkedIn people extraction failed", zap.String("company", comp.Name), zap.Error(err))
