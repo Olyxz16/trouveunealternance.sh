@@ -1,7 +1,7 @@
 # Implementation Roadmap - Rate Limiting Fixes
 
 **Date:** April 2, 2026  
-**Status:** Ready to Start
+**Status:** Phase 1 & 2 Complete
 
 ---
 
@@ -81,21 +81,29 @@ Based on architectural review, here's the revised implementation order:
 
 ### 🟢 **Phase 3: Advanced Features** (Week 3)
 
-Focus on Phase 1 & 2 first. Re-evaluate priorities after initial improvements.
+Not yet started:
+- **Task 3.1**: Global request queue with priority
+- **Task 3.2**: Dynamic rate adjustment
+- **Task 3.3**: Request deduplication
 
 ### 🔵 **Phase 4: Observability** (Week 4)
 
-Focus on Phase 1 & 2 first. Re-evaluate priorities after initial improvements.
+Not yet started:
+- **Task 4.1**: Enhanced rate limit logging
+- **Task 4.2**: Real-time TUI rate monitor
+- **Task 4.3**: Token usage analytics
+- **Task 4.4**: Enrichment success metrics
+- **Task 4.5**: Alert system
 
 ---
 
 ## 🎯 Immediate Next Steps
 
-1. **Start with Task 1.0** (Config architecture)
-2. **Create `config.yaml` template**
-3. **Update config loading logic**
-4. **Test with existing system**
-5. **Proceed to rate limiter**
+1. ~~Start with Task 1.0~~ ✅ Done
+2. ~~Create `config.yaml` template~~ ✅ Done
+3. ~~Update config loading logic~~ ✅ Done
+4. ~~Test with existing system~~ ✅ Done
+5. ~~Proceed to rate limiter~~ ✅ Done
 
 ---
 
@@ -113,10 +121,20 @@ After Phase 1 completion, we should see:
 ## 🚀 Ready to Start?
 
 Execute tasks in this order:
-1. Config architecture (Task 1.0)
-2. Fix model IDs (Task 1.1)
-3. Move parallelism (Task 1.5)
-4. Unified rate limiter (Task 1.2-1.4)
-5. Test and validate
+1. ~~Config architecture (Task 1.0)~~ ✅
+2. ~~Fix model IDs (Task 1.1)~~ ✅
+3. ~~Move parallelism (Task 1.5)~~ ✅
+4. ~~Unified rate limiter (Task 1.2-1.4)~~ ✅
+5. ~~Test and validate~~ ✅
+
+## ✅ Additional Improvements (Beyond Roadmap)
+
+- **LinkedIn people extraction**: HTML-based regex extractor bypassing LLM confusion
+- **JSON parsing reliability**: `isLikelyNonJSON()` detection with strict retry prompt
+- **Name validation**: `isValidPersonName()` filter rejecting job titles used as names
+- **Anti-bot detection**: Detect LinkedIn blocking via `/in/` URL presence, fail fast with `ENRICHMENT_BLOCKED` status
+- **DDG skip**: Wired up `skip_ddg_search` config in both discovery and people search
+
+---
 
 Let's begin! 🎉
