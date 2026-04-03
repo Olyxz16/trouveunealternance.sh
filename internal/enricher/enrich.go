@@ -281,6 +281,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 		if err != nil {
 			e.logger.Debug("People fetch failed", zap.String("company", comp.Name), zap.Error(err))
 		}
+
 		// Fallback to website if LinkedIn failed or no contacts found
 		if website != "" {
 			e.reporter.Update(pipeline.ProgressUpdate{
@@ -393,6 +394,24 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 
 	if len(realCandidates) == 0 {
 		e.logger.Debug("No contacts found even with external search", zap.String("company", comp.Name))
+
+		// Check if LinkedIn showed very few profiles — this means LinkedIn is limiting
+		// results for this company, not that contacts genuinely don't exist
+		if peopleRes.ContentMD != "" {
+			profileCount := scraper.CountPersonalProfiles(peopleRes.ContentMD)
+			if profileCount <= 2 {
+				e.logger.Warn("LinkedIn limiting results: very few profiles visible",
+					zap.String("company", comp.Name),
+					zap.Int("profile_count", profileCount))
+				e.reporter.Log(pipeline.LogMsg{
+					Level: "WARN",
+					Text:  fmt.Sprintf("[%s] LinkedIn limiting results: only %d profile(s) visible. Marking as blocked.", comp.Name, profileCount),
+				})
+				_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "ENRICHMENT_BLOCKED"})
+				return nil
+			}
+		}
+
 		_ = e.db.UpdateCompany(comp.ID, map[string]interface{}{"status": "NO_CONTACT_FOUND"})
 		return nil
 	}
