@@ -151,3 +151,41 @@ type LLMResponseCache struct {
 	CreatedAt    time.Time `json:"created_at"`
 	ExpiresAt    time.Time `gorm:"index" json:"expires_at"`
 }
+
+// QueueJob represents a queued work item for the daemon/worker system.
+type QueueJob struct {
+	ID          string     `gorm:"primaryKey" json:"id"`
+	Type        string     `gorm:"not null;index" json:"type"`                     // enrich_company, scan_department, scan_region, re_enrich_failed, discover_urls
+	Status      string     `gorm:"not null;index;default:'pending'" json:"status"` // pending, running, completed, failed, cancelled
+	Payload     string     `gorm:"type:text" json:"payload"`                       // JSON-encoded job parameters
+	Priority    int        `gorm:"default:0;index" json:"priority"`
+	Attempts    int        `gorm:"default:0" json:"attempts"`
+	MaxAttempts int        `gorm:"default:3" json:"max_attempts"`
+	Error       string     `gorm:"type:text" json:"error"`
+	CreatedAt   time.Time  `json:"created_at"`
+	StartedAt   *time.Time `json:"started_at"`
+	CompletedAt *time.Time `json:"completed_at"`
+	WorkerID    string     `gorm:"index" json:"worker_id"`
+	NextRunAt   *time.Time `gorm:"index" json:"next_run_at"` // for retry with backoff
+}
+
+// RateLimit tracks token bucket state for distributed rate limiting.
+type RateLimit struct {
+	ID         string    `gorm:"primaryKey" json:"id"` // global, openrouter, gemini_api
+	Tokens     float64   `gorm:"not null" json:"tokens"`
+	LastRefill time.Time `json:"last_refill"`
+	MaxTokens  float64   `gorm:"not null" json:"max_tokens"`
+	RefillRate float64   `gorm:"not null" json:"refill_rate"`  // tokens per second
+	DailyLimit int       `gorm:"default:0" json:"daily_limit"` // 0 = unlimited
+	DailyUsed  int       `gorm:"default:0" json:"daily_used"`
+	DailyReset time.Time `json:"daily_reset"`
+}
+
+// CompanyCooldown tracks per-company scrape cooldowns.
+type CompanyCooldown struct {
+	CompanyID     uint       `gorm:"primaryKey" json:"company_id"`
+	LastScrapedAt *time.Time `json:"last_scraped_at"`
+	NextAllowedAt *time.Time `gorm:"index" json:"next_allowed_at"`
+	ScrapeCount   int        `gorm:"default:0" json:"scrape_count"`
+	LastStatus    string     `json:"last_status"` // success, blocked, failed
+}
