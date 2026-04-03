@@ -121,6 +121,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 		disc.SetLogger(e.logger)
 		disc.SetReporter(e.reporter)
 		disc.SetSkipDDG(e.cfg.Enrichment.Discovery.SkipDDGSearch)
+		disc.SetUseBrowserSearch(e.cfg.Enrichment.Discovery.UseBrowserSearch)
 		w, l, err := disc.DiscoverURLs(ctx, *comp)
 		if err == nil {
 			if website == "" {

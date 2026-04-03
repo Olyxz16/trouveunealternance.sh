@@ -105,6 +105,7 @@ type DiscoveryConfig struct {
 	UseGeminiSearchGrounding bool   `yaml:"use_gemini_search_grounding"`
 	UseBrowserFallback       bool   `yaml:"use_browser_fallback"`
 	SkipDDGSearch            bool   `yaml:"skip_ddg_search"`
+	UseBrowserSearch         bool   `yaml:"use_browser_search"`
 	BrowserFallbackMinScore  int    `yaml:"browser_fallback_min_score"`
 }
 

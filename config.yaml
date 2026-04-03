@@ -67,10 +67,11 @@ enrichment:
   
   # Discovery strategy
   discovery:
-    strategy: "gemini_then_browser"  # Options: llm_only, gemini_then_browser
+    strategy: "llm_then_browser"  # Options: llm_only, gemini_then_browser, llm_then_browser
     use_gemini_search_grounding: true
     use_browser_fallback: true
     skip_ddg_search: true  # Skip DuckDuckGo intermediary (unreliable)
+    use_browser_search: true  # Use browser to search DuckDuckGo for URLs (no rate limits)
     
     # Only use browser fallback for high-value targets
     browser_fallback_min_score: 7

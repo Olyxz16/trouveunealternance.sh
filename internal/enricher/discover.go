@@ -24,27 +24,33 @@ var (
 )
 
 type URLDiscoverer struct {
-	fetcher    *scraper.CascadeFetcher
-	geminiAPI  *llm.GeminiAPIProvider // nil if not configured
-	classifier *Classifier
-	reporter   pipeline.Reporter
-	logger     *zap.Logger
-	skipDDG    bool
+	fetcher          *scraper.CascadeFetcher
+	geminiAPI        *llm.GeminiAPIProvider // nil if not configured
+	classifier       *Classifier
+	reporter         pipeline.Reporter
+	logger           *zap.Logger
+	skipDDG          bool
+	useBrowserSearch bool
 }
 
 func NewURLDiscoverer(fetcher *scraper.CascadeFetcher, geminiAPI *llm.GeminiAPIProvider, classifier *Classifier) *URLDiscoverer {
 	return &URLDiscoverer{
-		fetcher:    fetcher,
-		geminiAPI:  geminiAPI,
-		classifier: classifier,
-		reporter:   pipeline.NilReporter{},
-		logger:     zap.NewNop(),
-		skipDDG:    false,
+		fetcher:          fetcher,
+		geminiAPI:        geminiAPI,
+		classifier:       classifier,
+		reporter:         pipeline.NilReporter{},
+		logger:           zap.NewNop(),
+		skipDDG:          false,
+		useBrowserSearch: false,
 	}
 }
 
 func (d *URLDiscoverer) SetSkipDDG(skip bool) {
 	d.skipDDG = skip
+}
+
+func (d *URLDiscoverer) SetUseBrowserSearch(use bool) {
+	d.useBrowserSearch = use
 }
 
 func (d *URLDiscoverer) SetLogger(l *zap.Logger) {
@@ -79,7 +85,7 @@ Return ONLY a JSON object:
 }`
 
 // DiscoverURLs returns (website, linkedinURL, error).
-// Tries LLM knowledge first, then Gemini search grounding, then DuckDuckGo (if not skipped).
+// Tries LLM knowledge first, then Gemini search grounding, then browser-based search.
 func (d *URLDiscoverer) DiscoverURLs(ctx context.Context, comp db.Company) (string, string, error) {
 	// 1. Try LLM direct knowledge (no search needed for known companies)
 	website, linkedin, err := d.discoverWithLLM(ctx, comp)
@@ -110,23 +116,28 @@ func (d *URLDiscoverer) DiscoverURLs(ctx context.Context, comp db.Company) (stri
 		d.reporter.Log(pipeline.LogMsg{Level: "WARN", Text: fmt.Sprintf("[%s] %s.", comp.Name, msg)})
 	}
 
-	// 3. Fall back to DuckDuckGo only if not skipped
-	if !d.skipDDG {
+	// 3. Browser-based search (DuckDuckGo via browser, no rate limits)
+	if d.useBrowserSearch {
 		d.reporter.Update(pipeline.ProgressUpdate{
 			ID:     int(comp.ID),
 			Name:   comp.Name,
-			Step:   "URL Discovery (DDG Fallback)",
+			Step:   "URL Discovery (Browser Search)",
 			Status: pipeline.StatusRunning,
 		})
-		w, l, err := d.discoverWithDDG(ctx, comp)
-		d.logger.Debug("DDG discovery result",
+		w, l, err := d.discoverWithBrowserSearch(ctx, comp)
+		if err == nil && (w != "" || l != "") {
+			d.logger.Debug("Browser search discovery success",
+				zap.String("company", comp.Name),
+				zap.String("website", w),
+				zap.String("linkedin", l))
+			return w, l, nil
+		}
+		d.logger.Debug("Browser search discovery failed or empty",
 			zap.String("company", comp.Name),
-			zap.String("website", w),
-			zap.String("linkedin", l))
-		return w, l, err
+			zap.Error(err))
 	}
 
-	d.logger.Debug("DDG search skipped, no more discovery methods available", zap.String("company", comp.Name))
+	d.logger.Debug("All discovery methods exhausted", zap.String("company", comp.Name))
 	return "", "", fmt.Errorf("discovery exhausted for company %s", comp.Name)
 }
 
@@ -239,6 +250,76 @@ func (d *URLDiscoverer) tryGeminiSearch(ctx context.Context, comp db.Company) (s
 	}
 
 	return result.Website, result.LinkedinURL, nil
+}
+
+// discoverWithBrowserSearch uses the browser to search DuckDuckGo for company URLs.
+// This is the primary search method when Gemini is unavailable — no rate limits.
+func (d *URLDiscoverer) discoverWithBrowserSearch(ctx context.Context, comp db.Company) (string, string, error) {
+	var website, linkedin string
+
+	// Search 1: LinkedIn company page
+	query := fmt.Sprintf("%s %s linkedin company", comp.Name, comp.City)
+	searchURL := fmt.Sprintf("https://duckduckgo.com/html/?q=%s", url.QueryEscape(query))
+
+	d.logger.Info("Browser search for LinkedIn", zap.String("company", comp.Name), zap.String("query", query))
+	res, err := d.fetcher.ScrollAndFetch(ctx, searchURL, 1)
+	if err == nil {
+		w, l, err := d.classifier.ExtractURLsFromSearch(ctx, res.ContentMD, comp, "discovery_browser_linkedin")
+		if err == nil {
+			if l != "" {
+				linkedin = l
+			}
+			if w != "" {
+				website = w
+			}
+		}
+	}
+
+	// Search 2: Official website (if we don't have one yet)
+	if website == "" {
+		query = fmt.Sprintf("%s %s official website", comp.Name, comp.City)
+		searchURL = fmt.Sprintf("https://duckduckgo.com/html/?q=%s", url.QueryEscape(query))
+
+		d.logger.Info("Browser search for website", zap.String("company", comp.Name), zap.String("query", query))
+		res, err := d.fetcher.ScrollAndFetch(ctx, searchURL, 1)
+		if err == nil {
+			w, _, err := d.classifier.ExtractURLsFromSearch(ctx, res.ContentMD, comp, "discovery_browser_website")
+			if err == nil && w != "" {
+				website = w
+			}
+		}
+	}
+
+	// Search 3: General company search (if still missing URLs)
+	if website == "" || linkedin == "" {
+		query = fmt.Sprintf("%s %s", comp.Name, comp.City)
+		searchURL = fmt.Sprintf("https://duckduckgo.com/html/?q=%s", url.QueryEscape(query))
+
+		d.logger.Info("Browser search general", zap.String("company", comp.Name), zap.String("query", query))
+		res, err := d.fetcher.ScrollAndFetch(ctx, searchURL, 1)
+		if err == nil {
+			w, l, err := d.classifier.ExtractURLsFromSearch(ctx, res.ContentMD, comp, "discovery_browser_general")
+			if err == nil {
+				if website == "" && w != "" {
+					website = w
+				}
+				if linkedin == "" && l != "" {
+					linkedin = l
+				}
+			}
+		}
+	}
+
+	// Last resort: guess LinkedIn slug
+	if linkedin == "" {
+		linkedin = guessLinkedInSlug(comp.Name)
+	}
+
+	if website == "" && linkedin == "" {
+		return "", "", fmt.Errorf("browser search found no URLs for %s", comp.Name)
+	}
+
+	return website, linkedin, nil
 }
 
 func (d *URLDiscoverer) discoverWithDDG(ctx context.Context, comp db.Company) (string, string, error) {
