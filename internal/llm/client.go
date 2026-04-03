@@ -83,7 +83,6 @@ func (c *Client) GetRateLimiterSummary() string {
 }
 
 var freeFallbackModels = []string{
-	"google/gemini-2.0-flash-exp:free",
 	"meta-llama/llama-3.2-3b-instruct:free",
 	"mistralai/mistral-7b-instruct-v0.3:free",
 	"google/gemma-2-9b-it:free",
@@ -324,6 +323,30 @@ func extractJSON(content string) string {
 	return strings.TrimSpace(cleanJSON)
 }
 
+// isLikelyNonJSON detects responses that are clearly not JSON (HTML, error messages, etc.)
+func isLikelyNonJSON(content string) bool {
+	trimmed := strings.TrimSpace(content)
+	if len(trimmed) == 0 {
+		return true
+	}
+	// HTML responses
+	if strings.HasPrefix(trimmed, "<") || strings.HasPrefix(trimmed, "<!DOCTYPE") {
+		return true
+	}
+	// Error messages or conversational responses
+	prefixes := []string{"Error", "I ", "I'm", "I cannot", "I can't", "Sorry", "Unfortunately", "Here is", "Here's"}
+	for _, p := range prefixes {
+		if strings.HasPrefix(trimmed, p) {
+			return true
+		}
+	}
+	// Markdown responses that aren't code blocks
+	if strings.HasPrefix(trimmed, "#") && !strings.Contains(trimmed, "```") {
+		return true
+	}
+	return false
+}
+
 func (c *Client) CompleteJSON(ctx context.Context, req CompletionRequest, task, runID string, target interface{}) error {
 	req.JSONMode = true
 
@@ -348,9 +371,16 @@ func (c *Client) CompleteJSON(ctx context.Context, req CompletionRequest, task, 
 			}
 		}
 
-		c.logger.Warn("JSON unmarshal failed, retrying with error feedback", zap.Error(err))
-
-		req.User = fmt.Sprintf("%s\n\nYour previous response was not valid JSON: %s\nError: %v\nPlease return ONLY the valid JSON object.", req.User, resp.Content, err)
+		// Check if response is clearly not JSON (e.g. HTML, plain text, conversational)
+		if isLikelyNonJSON(resp.Content) {
+			c.logger.Warn("LLM returned non-JSON response, retrying with strict prompt",
+				zap.String("task", task),
+				zap.Int("content_len", len(resp.Content)))
+			req.User = fmt.Sprintf("Your previous response was NOT JSON — it was HTML or plain text.\n\nOriginal request:\n%s\n\nReturn ONLY a valid JSON object. No explanations, no HTML, no markdown.", req.User)
+		} else {
+			c.logger.Warn("JSON unmarshal failed, retrying with error feedback", zap.Error(err))
+			req.User = fmt.Sprintf("%s\n\nYour previous response was not valid JSON: %s\nError: %v\nPlease return ONLY the valid JSON object.", req.User, resp.Content, err)
+		}
 
 		resp, err = c.Complete(ctx, req, task, runID)
 		if err != nil {

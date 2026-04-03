@@ -120,6 +120,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 		disc := NewURLDiscoverer(e.fetcher, e.geminiAPI, e.classifier)
 		disc.SetLogger(e.logger)
 		disc.SetReporter(e.reporter)
+		disc.SetSkipDDG(e.cfg.Enrichment.Discovery.SkipDDGSearch)
 		w, l, err := disc.DiscoverURLs(ctx, *comp)
 		if err == nil {
 			if website == "" {
@@ -356,6 +357,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 		disc := NewURLDiscoverer(e.fetcher, e.geminiAPI, e.classifier)
 		disc.SetLogger(e.logger)
 		disc.SetReporter(e.reporter)
+		disc.SetSkipDDG(e.cfg.Enrichment.Discovery.SkipDDGSearch)
 		extContacts, err := disc.SearchPeopleOnLinkedIn(ctx, *comp, []string{"CTO", "Directeur Technique", "DevOps", "Recrutement", "RH", "Engineering Manager"})
 		if err == nil && len(extContacts) > 0 {
 			for i := range extContacts {

@@ -118,7 +118,19 @@ func (c *Classifier) ExtractPeopleFromSearchResults(ctx context.Context, markdow
 		User:   fmt.Sprintf("Search results (Markdown):\n\n%s", markdown),
 	}
 	err := c.llm.CompleteJSON(ctx, req, "extract_people_from_search", runID, &result)
-	return result, err
+	if err != nil {
+		return result, err
+	}
+
+	// Post-process: filter out entries where the "name" looks like a job title
+	var filtered []IndividualContact
+	for _, contact := range result.Contacts {
+		if isValidPersonName(contact.Name) {
+			filtered = append(filtered, contact)
+		}
+	}
+	result.Contacts = filtered
+	return result, nil
 }
 
 func (c *Classifier) ExtractURLsFromSearch(ctx context.Context, searchResultMD string, comp db.Company, runID string) (string, string, error) {

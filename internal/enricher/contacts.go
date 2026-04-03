@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"jobhunter/internal/llm"
 	"jobhunter/internal/scraper"
+	"regexp"
 	"strings"
 )
 
@@ -38,18 +39,29 @@ const PeopleExtractionPrompt = `You are extracting a list of individual employee
 
 Return ALL relevant contacts found (up to 5 people). Do not return just one.
 
-CRITICAL:
+CRITICAL RULES:
+- The "name" field must be a REAL PERSON NAME (e.g., "Guillaume Texier", "Marie Dupont"). NEVER use job titles as names.
+- The "role" field is the job title (e.g., "Directeur technique", "CTO", "VP Engineering").
+- If you cannot find a real person name, SKIP that entry entirely.
+
+EXTRACTION RULES:
 - ONLY return people explicitly mentioned in the provided content.
-- NEVER hallucinate or invent names (e.g., do NOT return "John Doe", "Jane Smith", "Mike Smith" if they are not in the text).
+- NEVER hallucinate or invent names.
 - If no real people are found, return an empty list.
 
-STRICT RULES:
-- linkedin_url MUST be a full, absolute personal LinkedIn profile URL starting with https://www.linkedin.com/in/ — never a relative path like /in/... — NEVER a /company/ URL
-- email: only include if a personal work email is explicitly visible on the page — do NOT include generic company emails (contact@, info@, careers@, jobs@) — leave empty if unsure
-- name and role are required — skip entries where you cannot determine both
-- Focus on: CTO, VP Engineering, Engineering Manager, Tech Lead, DevOps Engineer, Infrastructure Manager, IT Director, Technical Recruiter
+LINKEDIN URL:
+- If a personal LinkedIn profile URL (/in/...) is visible in the content, use it directly.
+- Otherwise, construct a search URL: https://www.linkedin.com/search/results/people/?keywords=FIRSTNAME+LASTNAME+COMPANY
 
-Return a JSON object with a single field "contacts" containing the list.`
+EMAIL: Only include if a personal work email is explicitly visible — leave empty if unsure.
+
+FOCUS ROLES (in priority order):
+1. Technical Leadership: CTO, VP Engineering, Engineering Manager, Tech Lead, Infrastructure Manager, IT Director, Directeur technique, Responsable technique
+2. Recruitment: Technical Recruiter, Talent Acquisition, RH, Responsable recrutement
+3. Founders/Management: CEO, Founder, President, Directeur général
+4. Peers: DevOps Engineer, Backend Developer, SRE
+
+Return a JSON object with a single field "contacts" containing the list. Each contact must have: name (real person name), role (job title), linkedin_url, email.`
 
 const ContactRankingPrompt = `Given this list of contacts at a %s company, pick the single BEST person to cold-email for a DevOps/backend internship.
 
@@ -103,16 +115,100 @@ For each profile, return a JSON object with:
 
 Return a JSON object with field "profiles" containing the list of extracted profiles in the same order as input.`
 
-// ExtractPeopleFromPage extracts all individuals from a People tab markdown.
-// Returns up to 5 candidates. Does NOT rank them.
+// ExtractPeopleFromPage extracts all individuals from a People tab.
+// Uses HTML-based extraction first (more reliable for LinkedIn), falls back to LLM.
 func (c *Classifier) ExtractPeopleFromPage(ctx context.Context, markdown string, runID string) (PeoplePageData, error) {
+	// Try HTML-based extraction first (more reliable for LinkedIn structure)
+	htmlPeople := scraper.ExtractPeopleFromLinkedInHTML(markdown)
+	if len(htmlPeople) > 0 {
+		var result PeoplePageData
+		for _, p := range htmlPeople {
+			if isValidPersonName(p.Name) && p.LinkedinURL != "" {
+				result.Contacts = append(result.Contacts, IndividualContact{
+					Name:        p.Name,
+					Role:        cleanContactRole(p.Role),
+					LinkedinURL: p.LinkedinURL,
+				})
+			}
+		}
+		if len(result.Contacts) > 0 {
+			return result, nil
+		}
+	}
+
+	// Fall back to LLM extraction
 	var result PeoplePageData
 	req := llm.CompletionRequest{
 		System: PeopleExtractionPrompt,
 		User:   fmt.Sprintf("LinkedIn People tab content:\n\n%s", markdown),
 	}
 	err := c.llm.CompleteJSON(ctx, req, "extract_people", runID, &result)
-	return result, err
+	if err != nil {
+		return result, err
+	}
+
+	// Post-process: filter out entries where the "name" looks like a job title
+	var filtered []IndividualContact
+	for _, contact := range result.Contacts {
+		if isValidPersonName(contact.Name) {
+			filtered = append(filtered, contact)
+		}
+	}
+	result.Contacts = filtered
+	return result, nil
+}
+
+// isValidPersonName checks if a string looks like a real person name vs a job title
+func isValidPersonName(name string) bool {
+	name = strings.TrimSpace(name)
+	if len(name) < 3 {
+		return false
+	}
+
+	parts := strings.Fields(name)
+	if len(parts) < 2 {
+		return false
+	}
+
+	jobTitleKeywords := []string{
+		"directeur", "responsable", "manager", "engineer", "developer",
+		"cto", "vp", "head", "chief", "lead", "senior", "junior",
+		"consultant", "architect", "analyst", "coordinator",
+		"technique", "administratif", "financier", "commercial",
+		"general", "directeur général", "directrice",
+		"ingénieur", "ingénieure", "développeur", "développeuse",
+		"relation de", "niveau", "utilisateur",
+	}
+
+	lowerName := strings.ToLower(name)
+	for _, keyword := range jobTitleKeywords {
+		if strings.Contains(lowerName, keyword) {
+			return false
+		}
+	}
+
+	for _, part := range parts {
+		if len(part) < 2 {
+			return false
+		}
+	}
+
+	return true
+}
+
+// cleanContactRole removes LinkedIn relation noise from role text.
+func cleanContactRole(role string) string {
+	role = regexp.MustCompile(`Relation de [0-9]+e niveau(?: et plus)?`).ReplaceAllString(role, "")
+	role = regexp.MustCompile(`[0-9]+e(?:\s|$)`).ReplaceAllString(role, " ")
+	role = strings.ReplaceAll(role, "Utilisateur LinkedIn", "")
+	role = strings.ReplaceAll(role, "\u00a0", " ")
+	role = strings.TrimSpace(role)
+	role = strings.TrimLeft(role, "·- \n\r\t")
+	role = strings.TrimSpace(role)
+	// Collapse multiple newlines
+	role = regexp.MustCompile(`\n\s*\n`).ReplaceAllString(role, "\n")
+	role = strings.TrimSpace(role)
+	return role
 }
 
 // RankContacts picks the best contact from a list for a given company type.

@@ -25,10 +25,11 @@ var (
 
 type URLDiscoverer struct {
 	fetcher    *scraper.CascadeFetcher
-	geminiAPI  *llm.GeminiAPIProvider // nil if not configured — falls back to DDG
+	geminiAPI  *llm.GeminiAPIProvider // nil if not configured
 	classifier *Classifier
 	reporter   pipeline.Reporter
 	logger     *zap.Logger
+	skipDDG    bool
 }
 
 func NewURLDiscoverer(fetcher *scraper.CascadeFetcher, geminiAPI *llm.GeminiAPIProvider, classifier *Classifier) *URLDiscoverer {
@@ -38,7 +39,12 @@ func NewURLDiscoverer(fetcher *scraper.CascadeFetcher, geminiAPI *llm.GeminiAPIP
 		classifier: classifier,
 		reporter:   pipeline.NilReporter{},
 		logger:     zap.NewNop(),
+		skipDDG:    false,
 	}
+}
+
+func (d *URLDiscoverer) SetSkipDDG(skip bool) {
+	d.skipDDG = skip
 }
 
 func (d *URLDiscoverer) SetLogger(l *zap.Logger) {
@@ -73,7 +79,7 @@ Return ONLY a JSON object:
 }`
 
 // DiscoverURLs returns (website, linkedinURL, error).
-// Tries LLM knowledge first, then Gemini search grounding, then DuckDuckGo.
+// Tries LLM knowledge first, then Gemini search grounding, then DuckDuckGo (if not skipped).
 func (d *URLDiscoverer) DiscoverURLs(ctx context.Context, comp db.Company) (string, string, error) {
 	// 1. Try LLM direct knowledge (no search needed for known companies)
 	website, linkedin, err := d.discoverWithLLM(ctx, comp)
@@ -100,24 +106,28 @@ func (d *URLDiscoverer) DiscoverURLs(ctx context.Context, comp db.Company) (stri
 		if err != nil {
 			msg = fmt.Sprintf("Gemini search grounding failed: %v", err)
 		}
-		d.logger.Warn("Gemini discovery failed, falling back to DDG", zap.String("company", comp.Name), zap.Error(err))
-		d.reporter.Log(pipeline.LogMsg{Level: "WARN", Text: fmt.Sprintf("[%s] %s. Falling back to DuckDuckGo...", comp.Name, msg)})
+		d.logger.Warn("Gemini discovery failed", zap.String("company", comp.Name), zap.Error(err))
+		d.reporter.Log(pipeline.LogMsg{Level: "WARN", Text: fmt.Sprintf("[%s] %s.", comp.Name, msg)})
+	}
 
+	// 3. Fall back to DuckDuckGo only if not skipped
+	if !d.skipDDG {
 		d.reporter.Update(pipeline.ProgressUpdate{
 			ID:     int(comp.ID),
 			Name:   comp.Name,
 			Step:   "URL Discovery (DDG Fallback)",
 			Status: pipeline.StatusRunning,
 		})
+		w, l, err := d.discoverWithDDG(ctx, comp)
+		d.logger.Debug("DDG discovery result",
+			zap.String("company", comp.Name),
+			zap.String("website", w),
+			zap.String("linkedin", l))
+		return w, l, err
 	}
 
-	// 3. Fall back to DuckDuckGo
-	w, l, err := d.discoverWithDDG(ctx, comp)
-	d.logger.Debug("DDG discovery result",
-		zap.String("company", comp.Name),
-		zap.String("website", w),
-		zap.String("linkedin", l))
-	return w, l, err
+	d.logger.Debug("DDG search skipped, no more discovery methods available", zap.String("company", comp.Name))
+	return "", "", fmt.Errorf("discovery exhausted for company %s", comp.Name)
 }
 
 func (d *URLDiscoverer) discoverWithLLM(ctx context.Context, comp db.Company) (string, string, error) {
@@ -327,13 +337,17 @@ func (d *URLDiscoverer) SearchPeopleOnLinkedIn(ctx context.Context, comp db.Comp
 		d.logger.Debug("Gemini people discovery failed or empty", zap.String("company", comp.Name), zap.Error(err))
 	}
 
-	// 3. Fallback to multiple DDG searches with different queries
+	// 3. Fallback to multiple DDG searches with different queries (only if not skipped)
+	var allContacts []IndividualContact
+	if d.skipDDG {
+		d.logger.Debug("DDG people search skipped", zap.String("company", comp.Name))
+		return allContacts, nil
+	}
 	queries := []string{
 		fmt.Sprintf("site:linkedin.com/in/ %s Poitiers (%s)", comp.Name, strings.Join(titles, " OR ")),
 		fmt.Sprintf("site:linkedin.com/in/ %s (%s)", comp.Name, strings.Join(titles, " OR ")),
 	}
 
-	var allContacts []IndividualContact
 	seenURLs := make(map[string]bool)
 
 	for i, query := range queries {
