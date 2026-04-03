@@ -18,6 +18,67 @@ import (
 	"go.uber.org/zap"
 )
 
+// stealthScript is injected into every page to hide automation fingerprints.
+const stealthScript = `
+// Remove navigator.webdriver flag
+Object.defineProperty(navigator, 'webdriver', { get: () => false });
+
+// Add window.chrome object (missing in headless Chrome)
+window.chrome = {
+  runtime: {},
+  loadTimes: function() {},
+  connection: { effectiveType: '4g', rtt: 50, downlink: 10, saveData: false }
+};
+
+// Spoof navigator.plugins to look like a real browser
+const fakePlugins = [
+  { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer' },
+  { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai' },
+  { name: 'Native Client', filename: 'internal-nacl-plugin' }
+];
+Object.defineProperty(navigator, 'plugins', {
+  get: () => fakePlugins,
+  enumerable: true,
+  configurable: true,
+  length: fakePlugins.length
+});
+
+// Spoof navigator.languages
+Object.defineProperty(navigator, 'languages', {
+  get: () => ['en-US', 'en', 'fr-FR', 'fr']
+});
+
+// Spoof navigator.hardwareConcurrency
+Object.defineProperty(navigator, 'hardwareConcurrency', {
+  get: () => 8
+});
+
+// Spoof navigator.maxTouchPoints
+Object.defineProperty(navigator, 'maxTouchPoints', {
+  get: () => 0
+});
+
+// Override permissions query to hide automation
+const originalQuery = window.navigator.permissions.query;
+window.navigator.permissions.query = (parameters) => {
+  if (parameters.name === 'notifications') {
+    return Promise.resolve({ state: Notification.permission });
+  }
+  return originalQuery(parameters);
+};
+
+// Spoof WebGL vendor and renderer
+const getParameter = WebGLRenderingContext.prototype.getParameter;
+WebGLRenderingContext.prototype.getParameter = function(parameter) {
+  if (parameter === 37445) return 'Google Inc. (Intel)';
+  if (parameter === 37446) return 'ANGLE (Intel, Intel(R) UHD Graphics Direct3D11 vs_5_0 ps_5_0, D3D11)';
+  return getParameter.call(this, parameter);
+};
+
+// Remove headless indicators
+delete navigator.__proto__.webdriver;
+`
+
 // cookieData matches the JSON structure for persistence.
 type cookieData struct {
 	Name     string  `json:"name"`
@@ -86,6 +147,13 @@ func NewBrowserFetcher(cookiesPath, display string, headless bool, binaryPath st
 
 func (f *BrowserFetcher) Name() string { return "browser" }
 
+// applyStealth injects stealth scripts to hide automation fingerprints.
+func (f *BrowserFetcher) applyStealth(ctx context.Context) error {
+	return chromedp.Run(ctx,
+		chromedp.Evaluate(stealthScript, nil),
+	)
+}
+
 func (f *BrowserFetcher) Navigate(ctx context.Context, url string) error {
 	f.logger.Info("browser navigating (persistent)", zap.String("url", url))
 	return chromedp.Run(f.ctx, chromedp.Navigate(url))
@@ -115,6 +183,11 @@ func (f *BrowserFetcher) Fetch(ctx context.Context, url string) (string, error) 
 		chromedp.Navigate(url),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
 		chromedp.ActionFunc(func(ctx context.Context) error {
+			// Apply stealth scripts to hide automation
+			if err := f.applyStealth(ctx); err != nil {
+				f.logger.Debug("stealth script failed", zap.Error(err))
+			}
+
 			// Check if we were redirected to a login wall
 			var currentURL string
 			if err := chromedp.Location(&currentURL).Do(ctx); err == nil {
@@ -208,6 +281,11 @@ func (f *BrowserFetcher) FetchWithScroll(ctx context.Context, url string, scroll
 		chromedp.Navigate(url),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
 		chromedp.ActionFunc(func(ctx context.Context) error {
+			// Apply stealth scripts to hide automation
+			if err := f.applyStealth(ctx); err != nil {
+				f.logger.Debug("stealth script failed", zap.Error(err))
+			}
+
 			// Check if we were redirected to a login wall
 			var currentURL string
 			if err := chromedp.Location(&currentURL).Do(ctx); err == nil {

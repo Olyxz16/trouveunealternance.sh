@@ -452,36 +452,27 @@ func (d *URLDiscoverer) discoverPeopleWithBrowser(ctx context.Context, comp db.C
 	seenURLs := make(map[string]bool)
 
 	for i, group := range queryGroups {
-		query := fmt.Sprintf("site:linkedin.com/in/ \"%s\" (%s)", comp.Name, strings.Join(group, " OR "))
-		// Use Google search instead of DDG (DDG blocks with CAPTCHA)
+		query := fmt.Sprintf("%s site:linkedin.com/in/ (%s)", comp.Name, strings.Join(group, " OR "))
 		searchURL := fmt.Sprintf("https://www.google.com/search?q=%s", url.QueryEscape(query))
 
-		d.logger.Info("Browser people search", zap.String("company", comp.Name), zap.Int("query", i+1), zap.String("query_text", query))
+		d.logger.Info("Google people search", zap.String("company", comp.Name), zap.Int("query", i+1), zap.String("query_text", query))
 
 		searchCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		res, err := d.fetcher.ScrollAndFetch(searchCtx, searchURL, 0)
 		cancel()
 
 		if err != nil {
-			d.logger.Debug("Browser people search failed", zap.String("company", comp.Name), zap.Int("query", i+1), zap.Error(err))
+			d.logger.Debug("Google people search failed", zap.String("company", comp.Name), zap.Int("query", i+1), zap.Error(err))
 			continue
 		}
 
-		// Extract people directly from Google search results using regex (no LLM needed)
-		people := extractPeopleFromGoogleResults(res.ContentMD, comp.Name)
-		d.logger.Info("Browser people search extracted",
+		people := extractPeopleFromSearchResults(res.ContentMD, comp.Name)
+		d.logger.Info("Google people search extracted",
 			zap.String("company", comp.Name),
 			zap.Int("query", i+1),
 			zap.Int("contacts_found", len(people)),
 			zap.Int("markdown_len", len(res.ContentMD)))
-		if len(people) == 0 {
-			// Log first 1000 chars of markdown for debugging
-			sample := res.ContentMD
-			if len(sample) > 1000 {
-				sample = sample[:1000]
-			}
-			d.logger.Warn("Google search returned no contacts - markdown sample", zap.String("company", comp.Name), zap.String("sample", sample))
-		}
+
 		for _, c := range people {
 			if c.LinkedinURL != "" && !seenURLs[c.LinkedinURL] {
 				allContacts = append(allContacts, c)
@@ -490,31 +481,114 @@ func (d *URLDiscoverer) discoverPeopleWithBrowser(ctx context.Context, comp db.C
 		}
 
 		if len(allContacts) >= 5 {
-			break // found enough
+			break
 		}
 	}
 
 	return allContacts, nil
 }
 
-// ddgProfileRe matches LinkedIn profile links in DDG search results
-var ddgProfileRe = regexp.MustCompile(`href="(https://[a-z]{2}\.linkedin\.com/in/([^"]+))"`)
-
-// ddgResultBlockRe matches individual DDG result blocks
-var ddgResultBlockRe = regexp.MustCompile(`<div class="result[^"]*"[^>]*>(.*?)</div>`)
-
-// extractPeopleFromGoogleResults extracts LinkedIn profiles from Google search results (markdown format).
-// Google markdown structure:
-// ### Name - Role at Company
-//
-// # LinkedIn · Name
-//
-// Description mentioning Company Name...
-func extractPeopleFromGoogleResults(markdown, companyName string) []IndividualContact {
+// extractPeopleFromSearchResults extracts LinkedIn profiles from search engine results (markdown format).
+// Works with both Bing and Google markdown structures.
+// Bing structure: [Name - Role](https://www.linkedin.com/in/slug)
+// Google structure: ### Name - Role ...\n\nLinkedIn · Name
+func extractPeopleFromSearchResults(markdown, companyName string) []IndividualContact {
 	var contacts []IndividualContact
 	seenNames := make(map[string]bool)
 
-	// Match Google search result headings: ### Name - Role ...
+	// Try Bing-style extraction first: [Name - Role](https://www.linkedin.com/in/slug)
+	bingLinkRe := regexp.MustCompile(`\[([^\]]+)\]\(https://(?:[a-z]{2}\.)?linkedin\.com/in/([^)]+)\)`)
+	bingMatches := bingLinkRe.FindAllStringSubmatch(markdown, -1)
+
+	for _, m := range bingMatches {
+		linkText := m[1]
+		slug := m[2]
+
+		// Clean slug
+		if idx := strings.Index(slug, "?"); idx != -1 {
+			slug = slug[:idx]
+		}
+		if idx := strings.Index(slug, "#"); idx != -1 {
+			slug = slug[:idx]
+		}
+
+		linkedinURL := "https://www.linkedin.com/in/" + slug
+
+		// Verify company name appears near this link
+		linkFullPattern := regexp.MustCompile(regexp.QuoteMeta(m[0]))
+		loc := linkFullPattern.FindStringIndex(markdown)
+		if loc == nil {
+			continue
+		}
+
+		start := loc[0] - 200
+		if start < 0 {
+			start = 0
+		}
+		end := loc[1] + 500
+		if end > len(markdown) {
+			end = len(markdown)
+		}
+		context := markdown[start:end]
+
+		keyWords := extractCompanyKeyWords(strings.ToLower(companyName))
+		matchCount := 0
+		for _, word := range keyWords {
+			if strings.Contains(strings.ToLower(context), word) {
+				matchCount++
+			}
+		}
+
+		if matchCount < 2 && !strings.Contains(strings.ToLower(context), strings.ToLower(companyName)) {
+			continue
+		}
+
+		linkText = strings.TrimSpace(linkText)
+		if linkText == "" {
+			continue
+		}
+
+		name := linkText
+		role := ""
+
+		for _, sep := range []string{" - ", " · ", " | "} {
+			if idx := strings.Index(linkText, sep); idx > 0 {
+				name = strings.TrimSpace(linkText[:idx])
+				role = strings.TrimSpace(linkText[idx+len(sep):])
+				break
+			}
+		}
+
+		name = strings.TrimRight(name, ". ")
+		role = strings.TrimRight(role, ". ")
+
+		nameParts := strings.Fields(name)
+		if len(nameParts) < 2 {
+			continue
+		}
+
+		nameKey := strings.ToLower(name)
+		if seenNames[nameKey] {
+			continue
+		}
+		seenNames[nameKey] = true
+
+		contacts = append(contacts, IndividualContact{
+			Name:        name,
+			Role:        role,
+			LinkedinURL: linkedinURL,
+		})
+
+		if len(contacts) >= 5 {
+			break
+		}
+	}
+
+	if len(contacts) > 0 {
+		return contacts
+	}
+
+	// Fall back to Google-style extraction: ### Name - Role ...\n\nLinkedIn · Name
 	headingRe := regexp.MustCompile(`^### (.+)$`)
 	lines := strings.Split(markdown, "\n")
 
@@ -525,11 +599,9 @@ func extractPeopleFromGoogleResults(markdown, companyName string) []IndividualCo
 		}
 
 		headingText := matches[1]
-		// Clean trailing "..." from truncated headings
 		headingText = strings.TrimRight(headingText, ". ")
 
-		// Check if this heading contains a LinkedIn result by looking at nearby lines
-		// Google puts "LinkedIn · Name" within 5 lines after the heading
+		// Check for LinkedIn nearby
 		isLinkedIn := false
 		for j := i + 1; j < len(lines) && j < i+6; j++ {
 			if strings.HasPrefix(strings.TrimSpace(lines[j]), "LinkedIn") {
@@ -541,8 +613,7 @@ func extractPeopleFromGoogleResults(markdown, companyName string) []IndividualCo
 			continue
 		}
 
-		// Check if company name appears in the context (within 10 lines)
-		// Use flexible matching: check if key words from company name appear
+		// Check company name in context
 		contextStart := i
 		contextEnd := i + 10
 		if contextEnd > len(lines) {
@@ -552,7 +623,6 @@ func extractPeopleFromGoogleResults(markdown, companyName string) []IndividualCo
 		contextLower := strings.ToLower(context)
 		companyLower := strings.ToLower(companyName)
 
-		// Extract key words from company name (remove common suffixes)
 		keyWords := extractCompanyKeyWords(companyLower)
 		matchCount := 0
 		for _, word := range keyWords {
@@ -561,13 +631,11 @@ func extractPeopleFromGoogleResults(markdown, companyName string) []IndividualCo
 			}
 		}
 
-		// Require at least 2 key words to match (or the full name)
 		if matchCount < 2 && !strings.Contains(contextLower, companyLower) {
 			continue
 		}
 
-		// Parse name and role from heading
-		// Patterns: "John Doe - CTO at Company", "John Doe · CTO at Company"
+		// Parse name and role
 		name := headingText
 		role := ""
 
@@ -579,24 +647,20 @@ func extractPeopleFromGoogleResults(markdown, companyName string) []IndividualCo
 			}
 		}
 
-		// Clean trailing dots from truncated text
 		name = strings.TrimRight(name, ". ")
 		role = strings.TrimRight(role, ". ")
 
-		// Validate: name should look like a person name (at least 2 words)
 		nameParts := strings.Fields(name)
 		if len(nameParts) < 2 {
 			continue
 		}
 
-		// Avoid duplicates
 		nameKey := strings.ToLower(name)
 		if seenNames[nameKey] {
 			continue
 		}
 		seenNames[nameKey] = true
 
-		// Construct LinkedIn URL from name (best-effort)
 		linkedinURL := constructLinkedInURL(name)
 
 		contacts = append(contacts, IndividualContact{

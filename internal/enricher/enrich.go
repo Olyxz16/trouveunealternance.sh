@@ -504,6 +504,20 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 		}
 	}
 
+	if best == nil && len(realCandidates) > 0 {
+		// Ranking failed but we have contacts — pick the first non-hallucinated one
+		for _, c := range enriched {
+			if c.Confidence != "hallucinated" && c.LinkedinURL != "" {
+				best = &c
+				e.logger.Info("Using first valid contact as fallback primary",
+					zap.String("company", comp.Name),
+					zap.String("contact", best.Name),
+					zap.String("role", best.Role))
+				break
+			}
+		}
+	}
+
 	if best == nil {
 		e.logger.Warn("No suitable contact found after ranking", zap.String("company", comp.Name))
 	} else {
