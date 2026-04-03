@@ -84,7 +84,6 @@ func (c *Client) GetRateLimiterSummary() string {
 
 var freeFallbackModels = []string{
 	"meta-llama/llama-3.2-3b-instruct:free",
-	"mistralai/mistral-7b-instruct-v0.3:free",
 	"google/gemma-2-9b-it:free",
 }
 

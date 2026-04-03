@@ -21,7 +21,7 @@ llm:
     
     ranking:
       primary: "minimax/minimax-m2.5:free"
-      fallback: "mistralai/mistral-7b-instruct-v0.3:free"
+      fallback: "google/gemma-2-9b-it:free"
       provider: "openrouter"
     
     enrichment:
