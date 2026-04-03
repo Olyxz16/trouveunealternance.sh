@@ -322,6 +322,8 @@ func (d *URLDiscoverer) discoverWithBrowserSearch(ctx context.Context, comp db.C
 	return website, linkedin, nil
 }
 
+// DEPRECATED: Use discoverWithBrowserSearch instead.
+// Kept for backward compatibility but no longer called in the main flow.
 func (d *URLDiscoverer) discoverWithDDG(ctx context.Context, comp db.Company) (string, string, error) {
 	query := fmt.Sprintf("%s %s linkedin company", comp.Name, comp.City)
 	searchURL := fmt.Sprintf("https://duckduckgo.com/html/?q=%s", url.QueryEscape(query))
@@ -418,10 +420,239 @@ func (d *URLDiscoverer) SearchPeopleOnLinkedIn(ctx context.Context, comp db.Comp
 		d.logger.Debug("Gemini people discovery failed or empty", zap.String("company", comp.Name), zap.Error(err))
 	}
 
-	// 3. Fallback to multiple DDG searches with different queries (only if not skipped)
+	// 3. Browser-based people search (DuckDuckGo via browser, no rate limits)
+	if d.useBrowserSearch {
+		people, err := d.discoverPeopleWithBrowser(ctx, comp, titles)
+		if err == nil && len(people) > 0 {
+			d.logger.Debug("Browser people discovery success", zap.String("company", comp.Name), zap.Int("count", len(people)))
+			return people, nil
+		}
+		d.logger.Debug("Browser people discovery failed or empty", zap.String("company", comp.Name), zap.Error(err))
+	}
+
+	// DEPRECATED: DDG fallback kept for backward compatibility but no longer called
+	// if !d.skipDDG {
+	//     return d.discoverPeopleWithDDG(ctx, comp, titles)
+	// }
+
+	return nil, nil
+}
+
+// discoverPeopleWithBrowser searches via Google to find individual LinkedIn profiles.
+// Uses 3 targeted queries for different role categories.
+func (d *URLDiscoverer) discoverPeopleWithBrowser(ctx context.Context, comp db.Company, titles []string) ([]IndividualContact, error) {
+	// Group titles into 3 search categories for broader coverage
+	techTitles := []string{"CTO", "Directeur Technique", "Tech Lead", "DevOps", "Engineering Manager", "Responsable technique", "DSI"}
+	hrTitles := []string{"RH", "Recrutement", "HR Manager", "Talent Acquisition", "Responsable RH", "Chargé de recrutement"}
+	mgmtTitles := []string{"CEO", "Directeur Général", "Founder", "Président", "Gérant", "Fondateur"}
+
+	queryGroups := [][]string{techTitles, hrTitles, mgmtTitles}
+
+	var allContacts []IndividualContact
+	seenURLs := make(map[string]bool)
+
+	for i, group := range queryGroups {
+		query := fmt.Sprintf("site:linkedin.com/in/ \"%s\" (%s)", comp.Name, strings.Join(group, " OR "))
+		// Use Google search instead of DDG (DDG blocks with CAPTCHA)
+		searchURL := fmt.Sprintf("https://www.google.com/search?q=%s", url.QueryEscape(query))
+
+		d.logger.Info("Browser people search", zap.String("company", comp.Name), zap.Int("query", i+1), zap.String("query_text", query))
+
+		searchCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
+		res, err := d.fetcher.ScrollAndFetch(searchCtx, searchURL, 0)
+		cancel()
+
+		if err != nil {
+			d.logger.Debug("Browser people search failed", zap.String("company", comp.Name), zap.Int("query", i+1), zap.Error(err))
+			continue
+		}
+
+		// Extract people directly from Google search results using regex (no LLM needed)
+		people := extractPeopleFromGoogleResults(res.ContentMD, comp.Name)
+		d.logger.Info("Browser people search extracted",
+			zap.String("company", comp.Name),
+			zap.Int("query", i+1),
+			zap.Int("contacts_found", len(people)),
+			zap.Int("markdown_len", len(res.ContentMD)))
+		if len(people) == 0 {
+			// Log first 1000 chars of markdown for debugging
+			sample := res.ContentMD
+			if len(sample) > 1000 {
+				sample = sample[:1000]
+			}
+			d.logger.Warn("Google search returned no contacts - markdown sample", zap.String("company", comp.Name), zap.String("sample", sample))
+		}
+		for _, c := range people {
+			if c.LinkedinURL != "" && !seenURLs[c.LinkedinURL] {
+				allContacts = append(allContacts, c)
+				seenURLs[c.LinkedinURL] = true
+			}
+		}
+
+		if len(allContacts) >= 5 {
+			break // found enough
+		}
+	}
+
+	return allContacts, nil
+}
+
+// ddgProfileRe matches LinkedIn profile links in DDG search results
+var ddgProfileRe = regexp.MustCompile(`href="(https://[a-z]{2}\.linkedin\.com/in/([^"]+))"`)
+
+// ddgResultBlockRe matches individual DDG result blocks
+var ddgResultBlockRe = regexp.MustCompile(`<div class="result[^"]*"[^>]*>(.*?)</div>`)
+
+// extractPeopleFromGoogleResults extracts LinkedIn profiles from Google search results (markdown format).
+// Google markdown structure:
+// ### Name - Role at Company
+//
+// # LinkedIn · Name
+//
+// Description mentioning Company Name...
+func extractPeopleFromGoogleResults(markdown, companyName string) []IndividualContact {
+	var contacts []IndividualContact
+	seenNames := make(map[string]bool)
+
+	// Match Google search result headings: ### Name - Role ...
+	headingRe := regexp.MustCompile(`^### (.+)$`)
+	lines := strings.Split(markdown, "\n")
+
+	for i, line := range lines {
+		matches := headingRe.FindStringSubmatch(strings.TrimSpace(line))
+		if len(matches) < 2 {
+			continue
+		}
+
+		headingText := matches[1]
+		// Clean trailing "..." from truncated headings
+		headingText = strings.TrimRight(headingText, ". ")
+
+		// Check if this heading contains a LinkedIn result by looking at nearby lines
+		// Google puts "LinkedIn · Name" within 5 lines after the heading
+		isLinkedIn := false
+		for j := i + 1; j < len(lines) && j < i+6; j++ {
+			if strings.HasPrefix(strings.TrimSpace(lines[j]), "LinkedIn") {
+				isLinkedIn = true
+				break
+			}
+		}
+		if !isLinkedIn {
+			continue
+		}
+
+		// Check if company name appears in the context (within 10 lines)
+		// Use flexible matching: check if key words from company name appear
+		contextStart := i
+		contextEnd := i + 10
+		if contextEnd > len(lines) {
+			contextEnd = len(lines)
+		}
+		context := strings.Join(lines[contextStart:contextEnd], " ")
+		contextLower := strings.ToLower(context)
+		companyLower := strings.ToLower(companyName)
+
+		// Extract key words from company name (remove common suffixes)
+		keyWords := extractCompanyKeyWords(companyLower)
+		matchCount := 0
+		for _, word := range keyWords {
+			if strings.Contains(contextLower, word) {
+				matchCount++
+			}
+		}
+
+		// Require at least 2 key words to match (or the full name)
+		if matchCount < 2 && !strings.Contains(contextLower, companyLower) {
+			continue
+		}
+
+		// Parse name and role from heading
+		// Patterns: "John Doe - CTO at Company", "John Doe · CTO at Company"
+		name := headingText
+		role := ""
+
+		for _, sep := range []string{" - ", " · ", " | "} {
+			if idx := strings.Index(headingText, sep); idx > 0 {
+				name = strings.TrimSpace(headingText[:idx])
+				role = strings.TrimSpace(headingText[idx+len(sep):])
+				break
+			}
+		}
+
+		// Clean trailing dots from truncated text
+		name = strings.TrimRight(name, ". ")
+		role = strings.TrimRight(role, ". ")
+
+		// Validate: name should look like a person name (at least 2 words)
+		nameParts := strings.Fields(name)
+		if len(nameParts) < 2 {
+			continue
+		}
+
+		// Avoid duplicates
+		nameKey := strings.ToLower(name)
+		if seenNames[nameKey] {
+			continue
+		}
+		seenNames[nameKey] = true
+
+		// Construct LinkedIn URL from name (best-effort)
+		linkedinURL := constructLinkedInURL(name)
+
+		contacts = append(contacts, IndividualContact{
+			Name:        name,
+			Role:        role,
+			LinkedinURL: linkedinURL,
+		})
+
+		if len(contacts) >= 5 {
+			break
+		}
+	}
+
+	return contacts
+}
+
+// extractCompanyKeyWords extracts key words from a company name for flexible matching.
+// Removes common suffixes and short words.
+func extractCompanyKeyWords(companyName string) []string {
+	// Remove common suffixes that don't help with matching
+	suffixes := []string{
+		" france", " s.a.", " s.a.s", " s.a.r.l", " sarl", " sas", " sa",
+		" ltd", " inc", " corp", " llc", " gmbh", " ag",
+	}
+	cleaned := companyName
+	for _, suffix := range suffixes {
+		cleaned = strings.ReplaceAll(cleaned, suffix, "")
+	}
+
+	words := strings.Fields(cleaned)
+	var keyWords []string
+	for _, w := range words {
+		if len(w) >= 3 {
+			keyWords = append(keyWords, w)
+		}
+	}
+	return keyWords
+}
+
+// constructLinkedInURL constructs a best-effort LinkedIn URL from a person's name.
+func constructLinkedInURL(name string) string {
+	slug := strings.ToLower(strings.TrimSpace(name))
+	// Remove special characters, keep letters and numbers
+	slug = regexp.MustCompile(`[^a-z0-9]+`).ReplaceAllString(slug, "-")
+	slug = strings.Trim(slug, "-")
+	if slug == "" {
+		return ""
+	}
+	return "https://www.linkedin.com/in/" + slug
+}
+
+// DEPRECATED: Use discoverPeopleWithBrowser instead.
+// Kept for backward compatibility but no longer called in the main flow.
+func (d *URLDiscoverer) discoverPeopleWithDDG(ctx context.Context, comp db.Company, titles []string) ([]IndividualContact, error) {
 	var allContacts []IndividualContact
 	if d.skipDDG {
-		d.logger.Debug("DDG people search skipped", zap.String("company", comp.Name))
 		return allContacts, nil
 	}
 	queries := []string{
@@ -431,32 +662,24 @@ func (d *URLDiscoverer) SearchPeopleOnLinkedIn(ctx context.Context, comp db.Comp
 
 	seenURLs := make(map[string]bool)
 
-	for i, query := range queries {
-		d.logger.Debug("DDG people search query", zap.String("company", comp.Name), zap.Int("query_idx", i+1), zap.String("query", query))
+	for _, query := range queries {
 		searchURL := fmt.Sprintf("https://duckduckgo.com/html/?q=%s", url.QueryEscape(query))
-
-		// Use a dedicated timeout for each search attempt
 		searchCtx, cancel := context.WithTimeout(ctx, 90*time.Second)
 		res, err := d.fetcher.ScrollAndFetch(searchCtx, searchURL, 0)
 		cancel()
 
 		if err != nil {
-			d.logger.Debug("DDG people search failed", zap.String("company", comp.Name), zap.Int("query_idx", i+1), zap.Error(err))
 			continue
 		}
 
-		people, err := d.classifier.ExtractPeopleFromSearchResults(ctx, res.ContentMD, comp, "linkedin_search_people")
+		people, err := d.classifier.ExtractPeopleFromSearchResults(ctx, res.ContentMD, comp, "linkedin_search_people_deprecated")
 		if err == nil {
 			for _, c := range people.Contacts {
-				if !seenURLs[c.LinkedinURL] && c.LinkedinURL != "" {
+				if c.LinkedinURL != "" && !seenURLs[c.LinkedinURL] {
 					allContacts = append(allContacts, c)
 					seenURLs[c.LinkedinURL] = true
 				}
 			}
-		}
-
-		if len(allContacts) >= 3 {
-			break // found enough
 		}
 	}
 
