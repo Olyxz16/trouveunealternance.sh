@@ -151,7 +151,7 @@ func (c *CascadeFetcher) Fetch(ctx context.Context, url string) (FetchResult, er
 
 	// 3. Try HTTP first
 	res, err := c.tryFetcher(ctx, c.http, url)
-	if err == nil && res.Quality >= c.cfg.Constants.QualityThresholds.HTTPMin {
+	if err == nil && res.Quality >= c.cfg.Quality.HTTPMin {
 		return res, nil
 	}
 

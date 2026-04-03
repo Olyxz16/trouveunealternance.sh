@@ -164,7 +164,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 			zap.String("method", res.Method))
 	}
 
-	if err != nil || res.Quality < e.cfg.Constants.QualityThresholds.BrowserMin {
+	if err != nil || res.Quality < e.cfg.Quality.BrowserMin {
 		if website != "" && targetURL != website {
 			e.logger.Debug("Low quality fetch, retrying with website",
 				zap.String("company", comp.Name),
@@ -187,7 +187,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 					zap.String("method", res.Method))
 			}
 		}
-		if err != nil || res.Quality < e.cfg.Constants.QualityThresholds.BrowserMin {
+		if err != nil || res.Quality < e.cfg.Quality.BrowserMin {
 			e.logger.Debug("Fetch failed or quality too low for both LinkedIn and Website",
 				zap.String("company", comp.Name),
 				zap.Float64("quality", res.Quality))
@@ -251,7 +251,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 	peopleURL := strings.TrimSuffix(linkedin, "/") + "/people/"
 	e.logger.Debug("Fetching people from LinkedIn", zap.String("company", comp.Name), zap.String("url", peopleURL))
 	peopleRes, err := e.fetcher.ScrollAndFetch(ctx, peopleURL, 3)
-	if err == nil && peopleRes.Quality >= e.cfg.Constants.QualityThresholds.DiscoveryMin {
+	if err == nil && peopleRes.Quality >= e.cfg.Quality.DiscoveryMin {
 		p, err := e.classifier.ExtractPeopleFromPage(ctx, peopleRes.ContentMD, runID)
 		if err != nil {
 			e.logger.Error("LinkedIn people extraction failed", zap.String("company", comp.Name), zap.Error(err))
@@ -296,7 +296,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 
 					e.logger.Debug("Visiting explored link", zap.String("company", comp.Name), zap.String("url", target))
 					subRes, err := e.fetcher.Fetch(ctx, target)
-					if err == nil && subRes.Quality >= e.cfg.Constants.QualityThresholds.EnrichMin {
+					if err == nil && subRes.Quality >= e.cfg.Quality.EnrichMin {
 						// Extract people from this page
 						p, err := e.classifier.ExtractPeopleFromPage(ctx, subRes.ContentMD, runID)
 						if err != nil {
@@ -310,7 +310,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 			}
 
 			// Final fallback to main page if no contacts found yet
-			if len(people.Contacts) == 0 && mainRes.Quality >= e.cfg.Constants.QualityThresholds.DiscoveryMin {
+			if len(people.Contacts) == 0 && mainRes.Quality >= e.cfg.Quality.DiscoveryMin {
 				p, err := e.classifier.ExtractPeopleFromPage(ctx, mainRes.ContentMD, runID)
 				if err != nil {
 					e.logger.Error("Website main page people extraction failed", zap.String("company", comp.Name), zap.Error(err))
@@ -379,7 +379,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 		return nil
 	}
 
-	// 5. Enrich top candidates from their individual /in/ profiles (max 3)
+	// 5. Enrich top candidates from their individual /in/ profiles (configurable)
 	e.reporter.Update(pipeline.ProgressUpdate{
 		ID:      int(comp.ID),
 		Name:    comp.Name,
@@ -387,7 +387,7 @@ func (e *Enricher) EnrichCompany(ctx context.Context, compID uint, runID string)
 		Status:  pipeline.StatusRunning,
 		Message: fmt.Sprintf("0/%d", min(3, len(realCandidates))),
 	})
-	maxProfiles := 3
+	maxProfiles := e.cfg.GetMaxProfilesToEnrich(comp.RelevanceScore)
 	enriched := make([]IndividualContact, 0, len(people.Contacts))
 
 	// We only enrich 'real' candidates

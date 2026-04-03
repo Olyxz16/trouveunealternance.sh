@@ -40,14 +40,13 @@ type Config struct {
 	Sirene     SireneConfig     `yaml:"sirene"`
 	Monitoring MonitoringConfig `yaml:"monitoring"`
 
-	// Backward compatibility - populated after loading
-	Constants           ConstantsCompat `yaml:"-"`
-	LLMPrimary          string          `yaml:"-"`
-	LLMFallback         string          `yaml:"-"` // Single fallback string for legacy code
-	OpenRouterRPM       int             `yaml:"-"`
-	OpenRouterModel     string          `yaml:"-"`
-	GeminiAPIModel      string          `yaml:"-"`
-	ForceBrowserDomains string          `yaml:"-"` // Comma-separated for legacy code
+	// Legacy compatibility fields
+	LLMPrimary          string `yaml:"-"`
+	LLMFallback         string `yaml:"-"`
+	OpenRouterRPM       int    `yaml:"-"`
+	OpenRouterModel     string `yaml:"-"`
+	GeminiAPIModel      string `yaml:"-"`
+	ForceBrowserDomains string `yaml:"-"`
 }
 
 // LLMConfig configures LLM providers and rate limiting
@@ -228,18 +227,9 @@ func Load() *Config {
 		log.Fatalf("Failed to unmarshal config.yaml: %v", err)
 	}
 
-	// Populate backward compatibility Constants field
-	cfg.Constants = ConstantsCompat{
-		UserAgent:         cfg.Scraping.UserAgent,
-		QualityThresholds: cfg.Quality,
-		Delays:            cfg.Scraping.Delays,
-		Sirene:            cfg.Sirene,
-	}
-
 	// Populate legacy LLM fields for backward compatibility
-	// LLMPrimary/LLMFallback should be provider names ("openrouter", "gemini_api"), not model names
 	cfg.LLMPrimary = cfg.LLM.Models.Extraction.Provider
-	cfg.LLMFallback = "" // Legacy code expects a provider name, but we only have one provider per task
+	cfg.LLMFallback = ""
 	cfg.OpenRouterRPM = cfg.LLM.RateLimits.RequestsPerMinute
 	cfg.OpenRouterModel = cfg.LLM.Models.Extraction.Primary
 	cfg.GeminiAPIModel = cfg.GetGeminiAPIModel()
@@ -312,35 +302,4 @@ func (c *Config) GetMaxProfilesToEnrich(relevanceScore int) int {
 		return c.Enrichment.Conditional.MaxProfilesToEnrich.MediumPriority
 	}
 	return c.Enrichment.Conditional.MaxProfilesToEnrich.LowPriority
-}
-
-// Legacy compatibility - keep these for backward compatibility
-type Constants struct {
-	UserAgent         string
-	QualityThresholds QualityConfig
-	Delays            ScrapingDelays
-	Sirene            SireneConfig
-}
-
-// GetConstants returns a legacy Constants struct for backward compatibility
-func (c *Config) GetConstants() Constants {
-	return Constants{
-		UserAgent:         c.Scraping.UserAgent,
-		QualityThresholds: c.Quality,
-		Delays:            c.Scraping.Delays,
-		Sirene:            c.Sirene,
-	}
-}
-
-// Constants field for backward compatibility
-func (c *Config) GetQualityThresholds() QualityConfig {
-	return c.Quality
-}
-
-// For backward compatibility with code that accesses cfg.Constants
-type ConstantsCompat struct {
-	UserAgent         string
-	QualityThresholds QualityConfig
-	Delays            ScrapingDelays
-	Sirene            SireneConfig
 }

@@ -111,21 +111,21 @@ func (f *BrowserFetcher) Fetch(ctx context.Context, url string) (string, error) 
 
 	err := chromedp.Run(timeoutCtx,
 		network.Enable(),
-		emulation.SetUserAgentOverride(f.cfg.Constants.UserAgent),
+		emulation.SetUserAgentOverride(f.cfg.Scraping.UserAgent),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			// Check if we were redirected to a login wall
 			var currentURL string
 			if err := chromedp.Location(&currentURL).Do(ctx); err == nil {
-				if strings.Contains(currentURL, "linkedin.com/authwall") || 
-				   strings.Contains(currentURL, "linkedin.com/login") ||
-				   strings.Contains(currentURL, "checkpoint/challenges") {
+				if strings.Contains(currentURL, "linkedin.com/authwall") ||
+					strings.Contains(currentURL, "linkedin.com/login") ||
+					strings.Contains(currentURL, "checkpoint/challenges") {
 					f.logger.Warn("LinkedIn session invalid or blocked (authwall)", zap.String("url", currentURL))
 					return fmt.Errorf("linkedin authwall detected: %s", currentURL)
 				}
 			}
-			
+
 			selectors := []string{
 				`button[data-control-name="ga-cookie.accept_all"]`,
 				`button#onetrust-accept-btn-handler`,
@@ -137,12 +137,12 @@ func (f *BrowserFetcher) Fetch(ctx context.Context, url string) (string, error) 
 				var nodes []*cdp.Node
 				if err := chromedp.Nodes(sel, &nodes, chromedp.AtLeast(0)).Do(ctx); err == nil && len(nodes) > 0 {
 					_ = chromedp.Click(sel, chromedp.ByQuery).Do(ctx)
-					time.Sleep(f.cfg.Constants.Delays.CookieClick)
+					time.Sleep(f.cfg.Scraping.Delays.CookieClick)
 				}
 			}
 			return nil
 		}),
-		chromedp.Sleep(f.cfg.Constants.Delays.BrowserSettle),
+		chromedp.Sleep(f.cfg.Scraping.Delays.BrowserSettle),
 		chromedp.OuterHTML("html", &html, chromedp.ByQuery),
 	)
 	if err != nil {
@@ -204,21 +204,21 @@ func (f *BrowserFetcher) FetchWithScroll(ctx context.Context, url string, scroll
 
 	actions := []chromedp.Action{
 		network.Enable(),
-		emulation.SetUserAgentOverride(f.cfg.Constants.UserAgent),
+		emulation.SetUserAgentOverride(f.cfg.Scraping.UserAgent),
 		chromedp.Navigate(url),
 		chromedp.WaitVisible("body", chromedp.ByQuery),
 		chromedp.ActionFunc(func(ctx context.Context) error {
 			// Check if we were redirected to a login wall
 			var currentURL string
 			if err := chromedp.Location(&currentURL).Do(ctx); err == nil {
-				if strings.Contains(currentURL, "linkedin.com/authwall") || 
-				   strings.Contains(currentURL, "linkedin.com/login") ||
-				   strings.Contains(currentURL, "checkpoint/challenges") {
+				if strings.Contains(currentURL, "linkedin.com/authwall") ||
+					strings.Contains(currentURL, "linkedin.com/login") ||
+					strings.Contains(currentURL, "checkpoint/challenges") {
 					f.logger.Warn("LinkedIn session invalid or blocked (authwall)", zap.String("url", currentURL))
 					return fmt.Errorf("linkedin authwall detected: %s", currentURL)
 				}
 			}
-			
+
 			selectors := []string{
 				`button[data-control-name="ga-cookie.accept_all"]`,
 				`button#onetrust-accept-btn-handler`,
@@ -230,19 +230,19 @@ func (f *BrowserFetcher) FetchWithScroll(ctx context.Context, url string, scroll
 				var nodes []*cdp.Node
 				if err := chromedp.Nodes(sel, &nodes, chromedp.AtLeast(0)).Do(ctx); err == nil && len(nodes) > 0 {
 					_ = chromedp.Click(sel, chromedp.ByQuery).Do(ctx)
-					time.Sleep(f.cfg.Constants.Delays.CookieClick)
+					time.Sleep(f.cfg.Scraping.Delays.CookieClick)
 				}
 			}
 			return nil
 		}),
-		chromedp.Sleep(f.cfg.Constants.Delays.BrowserSettle),
+		chromedp.Sleep(f.cfg.Scraping.Delays.BrowserSettle),
 		chromedp.MouseEvent("mouseMoved", 150, 150),
 	}
 
 	for i := 0; i < scrolls; i++ {
 		actions = append(actions,
 			chromedp.Evaluate(`window.scrollTo(0, document.body.scrollHeight * (0.4 + Math.random()*0.5))`, nil),
-			chromedp.Sleep(f.cfg.Constants.Delays.ScrollBase+time.Duration(i)*f.cfg.Constants.Delays.ScrollVariance),
+			chromedp.Sleep(f.cfg.Scraping.Delays.ScrollBase+time.Duration(i)*f.cfg.Scraping.Delays.ScrollVariance),
 			chromedp.MouseEvent("mouseMoved", 200+float64(i)*20, 200+float64(i)*20),
 		)
 	}
@@ -318,7 +318,7 @@ func (f *BrowserFetcher) loadCookies() error {
 				WithPath(c.Path).
 				WithHTTPOnly(c.HTTPOnly).
 				WithSecure(c.Secure)
-			
+
 			// Only set expires if it's a future date and not a session cookie (0 or -1)
 			if c.Expires > 0 {
 				expr := cdp.TimeSinceEpoch(time.Unix(int64(c.Expires), 0))

@@ -91,7 +91,7 @@ func (s *SireneCollector) Scan(ctx context.Context, departments []string, minHea
 	}
 
 	deptList := "'" + strings.Join(departments, "','") + "'"
-	
+
 	query := fmt.Sprintf(`
 		SELECT 
 			e.siren, 
@@ -164,7 +164,7 @@ func (s *SireneCollector) Scan(ctx context.Context, departments []string, minHea
 		status := "NEW"
 
 		isTech := false
-		for _, prefix := range s.cfg.Constants.Sirene.TechNafPrefixes {
+		for _, prefix := range s.cfg.Sirene.TechNafPrefixes {
 			if strings.HasPrefix(cleanNAF, prefix) {
 				isTech = true
 				break
@@ -185,7 +185,7 @@ func (s *SireneCollector) Scan(ctx context.Context, departments []string, minHea
 			Name:           cleanCompanyName(nameRaw),
 			Siren:          siren,
 			NAFCode:        naf,
-			NAFLabel:       s.cfg.Constants.Sirene.NafLabels[cleanNAF],
+			NAFLabel:       s.cfg.Sirene.NafLabels[cleanNAF],
 			City:           city,
 			Department:     zip[:2],
 			HeadcountRange: s.headcountLabel(hcCode),
@@ -211,14 +211,14 @@ func (s *SireneCollector) Scan(ctx context.Context, departments []string, minHea
 }
 
 func (s *SireneCollector) getMinHeadcount(code string) int {
-	if val, ok := s.cfg.Constants.Sirene.HeadcountLevels[code]; ok {
+	if val, ok := s.cfg.Sirene.HeadcountLevels[code]; ok {
 		return val
 	}
 	return 0
 }
 
 func (s *SireneCollector) headcountLabel(code string) string {
-	if l, ok := s.cfg.Constants.Sirene.HeadcountLabels[code]; ok {
+	if l, ok := s.cfg.Sirene.HeadcountLabels[code]; ok {
 		return l
 	}
 	return code
